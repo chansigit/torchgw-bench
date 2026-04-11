@@ -51,6 +51,8 @@ def sample_swiss_roll(n: int, noise: float = 0.05, seed: int = 1) -> tuple[np.nd
     return points, angles
 
 
+import time
+
 from scipy.stats import spearmanr
 
 
@@ -66,6 +68,51 @@ def arclen_spearman(T: np.ndarray, src_angles: np.ndarray, tgt_angles: np.ndarra
     matched = tgt_angles[np.argmax(T, axis=1)]
     rho, _ = spearmanr(src_angles, matched)
     return float(rho)
+
+
+def get_host_info() -> dict:
+    """Return a dict describing the current host's GPU, torch, CUDA, CPU."""
+    info: dict = {"gpu": "cpu", "torch": "unknown", "cuda": None}
+    try:
+        import torch
+        info["torch"] = torch.__version__
+        if torch.cuda.is_available():
+            info["gpu"] = torch.cuda.get_device_name(0)
+            info["cuda"] = torch.version.cuda
+    except ImportError:
+        pass
+    try:
+        import platform
+        info["cpu"] = platform.processor() or platform.machine()
+        info["hostname"] = platform.node()
+        info["python"] = platform.python_version()
+    except Exception:
+        pass
+    return info
+
+
+def build_record(track: str, solver: str, seed: int, subset: str) -> dict:
+    """Build an initial JSON record skeleton following CONVENTIONS.md.
+
+    The caller fills in dataset, hyperparams, metrics, and artifacts after
+    running the solver; on failure the caller flips status to 'fail' and sets
+    'error' to the exception string.
+    """
+    return {
+        "track": track,
+        "solver": solver,
+        "solver_version": None,
+        "seed": seed,
+        "subset": subset,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "host": get_host_info(),
+        "status": "ok",
+        "error": None,
+        "dataset": {},
+        "hyperparams": {},
+        "metrics": {"correctness": {}, "task": {}, "efficiency": {}, "stability": {}},
+        "artifacts": {},
+    }
 
 
 def main() -> None:

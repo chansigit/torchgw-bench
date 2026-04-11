@@ -57,3 +57,39 @@ def test_arclen_spearman_reverse_permutation():
     T = np.fliplr(np.eye(n)) / n
     rho = run.arclen_spearman(T, src_angles, tgt_angles)
     assert pytest.approx(rho, abs=1e-6) == -1.0
+
+
+# ---- host info ----------------------------------------------------------
+
+def test_get_host_info_has_required_keys():
+    host = run.get_host_info()
+    assert "gpu" in host
+    assert "torch" in host
+    assert "cuda" in host
+    # torch must be a version string like "2.x.y"
+    assert isinstance(host["torch"], str)
+    assert host["torch"][0].isdigit()
+
+
+# ---- record builder -----------------------------------------------------
+
+def test_build_record_minimum_fields():
+    rec = run.build_record(
+        track="core/01_foundation",
+        solver="torchgw-landmark",
+        seed=0,
+        subset="full",
+    )
+    for key in ("track", "solver", "seed", "subset", "timestamp", "host",
+                "status", "error", "dataset", "hyperparams", "metrics", "artifacts"):
+        assert key in rec, f"missing key: {key}"
+    assert rec["status"] == "ok"
+    assert rec["error"] is None
+    assert rec["metrics"] == {"correctness": {}, "task": {}, "efficiency": {}, "stability": {}}
+
+
+def test_build_record_timestamp_is_utc_iso8601():
+    import re
+    rec = run.build_record(track="t", solver="s", seed=0, subset="full")
+    # e.g. 2026-04-10T14:32:00Z
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", rec["timestamp"])
