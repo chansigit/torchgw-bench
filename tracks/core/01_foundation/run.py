@@ -266,7 +266,74 @@ def run_pot_entropic(
 
 
 def main() -> None:
-    raise NotImplementedError("main() is implemented in a later task")
+    import argparse
+    import json
+    from pathlib import Path
+
+    ap = argparse.ArgumentParser(description="C1 Foundation track: spiral -> swiss roll GW alignment")
+    ap.add_argument("--solver", required=True,
+                    choices=["torchgw-landmark", "pot-entropic"],
+                    help="Which solver to run")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", type=Path, required=True, help="Directory to write the JSON record into")
+    ap.add_argument("--subset", default="full", choices=["small", "full"])
+    ap.add_argument("--n-source", type=int, default=400)
+    ap.add_argument("--n-target", type=int, default=500)
+    args = ap.parse_args()
+
+    rec = build_record(
+        track="core/01_foundation",
+        solver=args.solver,
+        seed=args.seed,
+        subset=args.subset,
+    )
+    rec["dataset"] = {
+        "name": f"spiral_{args.n_source}_swissroll_{args.n_target}",
+        "n_source": args.n_source,
+        "n_target": args.n_target,
+        "source_dim": 2,
+        "target_dim": 3,
+    }
+
+    out_path = args.out / f"core_01_foundation__{args.solver}__seed{args.seed}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        X, src_angles = sample_spiral(args.n_source, seed=args.seed)
+        Y, tgt_angles = sample_swiss_roll(args.n_target, seed=args.seed + 1)
+
+        if args.solver == "torchgw-landmark":
+            result = run_torchgw_landmark(X, Y, seed=args.seed)
+        elif args.solver == "pot-entropic":
+            result = run_pot_entropic(X, Y, seed=args.seed)
+        else:
+            raise ValueError(f"unknown solver: {args.solver}")
+
+        # Pull hyperparams + version into the record
+        rec["hyperparams"] = result["hyperparams"]
+        rec["solver_version"] = result["solver_version"]
+
+        # Fill metrics sub-dicts
+        rec["metrics"]["correctness"] = {
+            "gw_cost": result["gw_cost"],
+            "marginal_error": result["marginal_error"],
+        }
+        rec["metrics"]["task"] = {
+            "spearman_arclen": arclen_spearman(result["T"], src_angles, tgt_angles),
+        }
+        rec["metrics"]["efficiency"] = {
+            "wall_s": result["wall_s"],
+            "gpu_peak_gb": result["gpu_peak_gb"],
+            "iterations": result["iterations"],
+        }
+    except Exception as e:
+        rec["status"] = "fail"
+        rec["error"] = f"{type(e).__name__}: {e}"
+        out_path.write_text(json.dumps(rec, indent=2))
+        raise
+    else:
+        out_path.write_text(json.dumps(rec, indent=2))
+        print(f"[C1] wrote {out_path}")
 
 
 if __name__ == "__main__":
