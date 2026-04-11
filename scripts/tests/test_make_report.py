@@ -123,3 +123,27 @@ def test_render_track_section_handles_missing_metrics():
     md = make_report.render_track_section("core/01_foundation", records)
     assert "broken-baseline" in md
     assert "fail" in md.lower() or "✗" in md or "FAIL" in md
+
+
+# ---- render_docs_markdown -----------------------------------------------
+
+def test_render_docs_markdown_core_tier_only_core_records():
+    records = [
+        {"track": "core/01_foundation", "solver": "torchgw", "status": "ok",
+         "dataset": {"name": "spiral_400_swissroll_500", "n_source": 400, "n_target": 500},
+         "host": {"gpu": "NVIDIA H100 80GB"},
+         "metrics": {"correctness": {"gw_cost": 0.02}, "task": {"spearman_arclen": 0.99},
+                     "efficiency": {"wall_s": 1.0, "gpu_peak_gb": 0.7, "iterations": 200}}},
+        {"track": "extended/01_spatial_omics", "solver": "torchgw", "status": "ok",
+         "metrics": {}},
+    ]
+    md = make_report.render_docs_markdown(records, tier="core")
+    assert "# Core tier benchmark" in md or "# Core Tier" in md.lower()
+    assert "core/01_foundation" in md
+    assert "extended/01_spatial_omics" not in md
+
+
+def test_render_docs_markdown_empty_records_still_renders_header():
+    md = make_report.render_docs_markdown([], tier="core")
+    assert "Core" in md
+    assert isinstance(md, str)
