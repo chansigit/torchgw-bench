@@ -1,0 +1,23 @@
+# Raw datasets and run outputs are not committed to git
+data/*
+!data/.gitkeep
+results/*
+!results/.gitkeep
+!results/README.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Envs (if any local .conda is created here)
+.conda/
+.venv/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
