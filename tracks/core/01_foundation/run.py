@@ -156,7 +156,7 @@ def run_torchgw_landmark(
     np.random.seed(seed)
 
     t0 = time.perf_counter()
-    T, log = sampled_gw(
+    T, log = sampled_gw(  # type: ignore[misc]
         X, Y,
         distance_mode="landmark",
         mixed_precision=True,
@@ -166,6 +166,7 @@ def run_torchgw_landmark(
         log=True,
         verbose=False,
     )
+    log_d: dict = log if isinstance(log, dict) else {}  # type: ignore[arg-type]
     if use_cuda:
         torch.cuda.synchronize()
     wall_s = time.perf_counter() - t0
@@ -178,11 +179,11 @@ def run_torchgw_landmark(
 
     return {
         "T": T_np,
-        "gw_cost": float(log.get("gw_cost", float("nan"))),
+        "gw_cost": float(log_d.get("gw_cost", float("nan"))),
         "marginal_error": marginal_error,
         "wall_s": wall_s,
         "gpu_peak_gb": gpu_peak_gb,
-        "iterations": int(log.get("n_iter", log.get("iterations", 0))),
+        "iterations": int(log_d.get("n_iter", log_d.get("iterations", 0))),
         "hyperparams": {
             "M": M,
             "epsilon": epsilon,
@@ -238,8 +239,8 @@ def run_pot_entropic(
 
     T_np = np.asarray(T, dtype=np.float64)
     marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - p)))
-    gw_cost = float(pot_log.get("gw_dist", float("nan")))
-    err_list = pot_log.get("err", [])
+    gw_cost = float(pot_log.get("gw_dist", float("nan")))  # type: ignore
+    err_list: list = pot_log.get("err") or []  # type: ignore[assignment]
     iterations = len(err_list) if err_list else max_iter
 
     return {
