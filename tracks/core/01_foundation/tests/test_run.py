@@ -50,13 +50,13 @@ def test_arclen_spearman_perfect_identity():
 
 
 def test_arclen_spearman_reverse_permutation():
-    """A reverse-diagonal transport plan -> Spearman = -1."""
+    """A reverse-diagonal transport plan has |Spearman| = 1 (GW orientation symmetry)."""
     n = 50
     src_angles = np.linspace(0, 9, n)
     tgt_angles = np.linspace(0, 9, n)
     T = np.fliplr(np.eye(n)) / n
     rho = run.arclen_spearman(T, src_angles, tgt_angles)
-    assert pytest.approx(rho, abs=1e-6) == -1.0
+    assert pytest.approx(rho, abs=1e-6) == 1.0
 
 
 # ---- host info ----------------------------------------------------------
