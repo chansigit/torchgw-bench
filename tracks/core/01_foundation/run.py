@@ -131,8 +131,14 @@ def run_torchgw_landmark(
     epsilon: float = 5e-3,
     M: int = 80,
     max_iter: int = 300,
+    k: int = 5,
+    n_landmarks: int = 50,
 ) -> dict:
     """Run torchgw sampled_gw with landmark distance mode and mixed precision.
+
+    k=5 (sparse kNN graph) is required for manifold-structured data like the
+    2D spiral: a denser graph (k>=7) creates shortcuts between coils and
+    destroys geodesic structure, collapsing Spearman from ~1.0 to ~0.74.
 
     Returns a dict with:
         T (ndarray): (N, K) transport plan
@@ -166,6 +172,8 @@ def run_torchgw_landmark(
         M=M,
         epsilon=epsilon,
         max_iter=max_iter,
+        k=k,
+        n_landmarks=n_landmarks,
         log=True,
         verbose=False,
     )
@@ -191,6 +199,8 @@ def run_torchgw_landmark(
             "M": M,
             "epsilon": epsilon,
             "max_iter": max_iter,
+            "k": k,
+            "n_landmarks": n_landmarks,
             "distance_mode": "landmark",
             "mixed_precision": True,
         },
