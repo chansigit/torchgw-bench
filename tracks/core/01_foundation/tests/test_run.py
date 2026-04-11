@@ -111,3 +111,17 @@ def test_run_torchgw_landmark_returns_expected_fields():
     # Iterations should be at least 1
     assert result["iterations"] >= 1
     assert result["wall_s"] > 0
+
+
+# ---- POT entropic GW baseline ------------------------------------------
+
+def test_run_pot_entropic_returns_expected_fields():
+    X, _ = run.sample_spiral(n=60, seed=0)
+    Y, _ = run.sample_swiss_roll(n=80, seed=1)
+    result = run.run_pot_entropic(X, Y, seed=0)
+    for key in ("T", "gw_cost", "marginal_error", "wall_s", "gpu_peak_gb",
+                "iterations", "hyperparams", "solver_version"):
+        assert key in result, f"missing key: {key}"
+    assert result["T"].shape == (60, 80)
+    assert result["gpu_peak_gb"] is None   # POT runs on CPU
+    assert result["wall_s"] > 0

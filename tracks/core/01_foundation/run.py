@@ -194,6 +194,70 @@ def run_torchgw_landmark(
     }
 
 
+def run_pot_entropic(
+    X: np.ndarray,
+    Y: np.ndarray,
+    seed: int = 0,
+    epsilon: float = 5e-3,
+    max_iter: int = 500,
+) -> dict:
+    """Run POT's entropic Gromov-Wasserstein on CPU with squared-Euclidean costs.
+
+    Returns the same dict shape as run_torchgw_landmark for apples-to-apples
+    downstream comparison.
+    """
+    import ot
+    import ot.gromov as otgw
+
+    C1 = np.asarray(ot.dist(X, X, metric="sqeuclidean"), dtype=np.float64)
+    C2 = np.asarray(ot.dist(Y, Y, metric="sqeuclidean"), dtype=np.float64)
+    C1 /= (C1.max() + 1e-12)
+    C2 /= (C2.max() + 1e-12)
+
+    p = np.full(X.shape[0], 1.0 / X.shape[0], dtype=np.float64)
+    q = np.full(Y.shape[0], 1.0 / Y.shape[0], dtype=np.float64)
+
+    np.random.seed(seed)
+
+    t0 = time.perf_counter()
+    T_and_log = otgw.entropic_gromov_wasserstein(
+        C1, C2, p, q,
+        loss_fun="square_loss",
+        epsilon=epsilon,
+        max_iter=max_iter,
+        tol=1e-9,
+        log=True,
+        verbose=False,
+    )
+    if isinstance(T_and_log, tuple):
+        T, pot_log = T_and_log
+    else:
+        T = T_and_log
+        pot_log = {}
+    wall_s = time.perf_counter() - t0
+
+    T_np = np.asarray(T, dtype=np.float64)
+    marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - p)))
+    gw_cost = float(pot_log.get("gw_dist", float("nan")))
+    err_list = pot_log.get("err", [])
+    iterations = len(err_list) if err_list else max_iter
+
+    return {
+        "T": T_np,
+        "gw_cost": gw_cost,
+        "marginal_error": marginal_error,
+        "wall_s": wall_s,
+        "gpu_peak_gb": None,
+        "iterations": iterations,
+        "hyperparams": {
+            "epsilon": epsilon,
+            "max_iter": max_iter,
+            "loss_fun": "square_loss",
+        },
+        "solver_version": f"pot=={getattr(ot, '__version__', 'unknown')}",
+    }
+
+
 def main() -> None:
     raise NotImplementedError("main() is implemented in a later task")
 
