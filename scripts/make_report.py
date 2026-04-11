@@ -16,6 +16,7 @@ __all__ = [
 ]
 
 import json
+from collections import defaultdict
 from pathlib import Path
 
 
@@ -36,9 +37,6 @@ def load_results(results_dir: Path) -> list[dict]:
         except (json.JSONDecodeError, OSError):
             continue
     return records
-
-
-from collections import defaultdict
 
 
 def group_by_track(records: list[dict]) -> dict[str, list[dict]]:

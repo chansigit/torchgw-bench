@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import make_report  # noqa: E402  — sys.path set by conftest.py
+import make_report  # type: ignore[import-not-found]  # noqa: E402  — sys.path set by conftest.py
 
 
 # ---- load_results -------------------------------------------------------
