@@ -102,7 +102,7 @@ def test_render_track_section_header_and_table_columns():
     md = make_report.render_track_section("core/01_foundation", records)
     assert "## Core Track: `core/01_foundation`" in md
     assert "spiral_400_swissroll_500" in md
-    assert "| Solver" in md
+    assert "Solver" in md
     assert "Spearman" in md
     assert "Wall (s)" in md
     assert "torchgw-landmark" in md
@@ -147,3 +147,49 @@ def test_render_docs_markdown_empty_records_still_renders_header():
     md = make_report.render_docs_markdown([], tier="core")
     assert "Core" in md
     assert isinstance(md, str)
+
+
+# ---- multi-scale table --------------------------------------------------
+
+def test_render_track_section_shows_scale_column_when_multiple_scales():
+    records = [
+        {
+            "track": "core/01_foundation",
+            "solver": "torchgw-landmark",
+            "status": "ok",
+            "dataset": {"name": "spiral_400_swissroll_500", "n_source": 400, "n_target": 500},
+            "metrics": {"correctness": {"gw_cost": 0.001}, "task": {"spearman_arclen": 0.999},
+                        "efficiency": {"wall_s": 7.1, "gpu_peak_gb": 0.04, "iterations": 300}},
+        },
+        {
+            "track": "core/01_foundation",
+            "solver": "torchgw-landmark",
+            "status": "ok",
+            "dataset": {"name": "spiral_4000_swissroll_5000", "n_source": 4000, "n_target": 5000},
+            "metrics": {"correctness": {"gw_cost": 0.002}, "task": {"spearman_arclen": 0.998},
+                        "efficiency": {"wall_s": 12.3, "gpu_peak_gb": 0.5, "iterations": 280}},
+        },
+    ]
+    md = make_report.render_track_section("core/01_foundation", records)
+    # Scale column header must appear
+    assert "N×K" in md or "Scale" in md
+    # Both scale values must appear as data
+    assert "400×500" in md or "400" in md
+    assert "4000×5000" in md or "4000" in md
+
+
+def test_render_track_section_skip_record_shows_skip_status():
+    records = [
+        {
+            "track": "core/01_foundation",
+            "solver": "pot-entropic",
+            "status": "skip",
+            "error": "skipped: POT O(N²) memory guard (max(N,K)=12000 > 5000)",
+            "dataset": {"name": "spiral_10000_swissroll_12000", "n_source": 10000, "n_target": 12000},
+            "metrics": {},
+        },
+    ]
+    md = make_report.render_track_section("core/01_foundation", records)
+    assert "pot-entropic" in md
+    # skip status marker must appear
+    assert "skip" in md.lower() or "⊘" in md

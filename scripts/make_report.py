@@ -92,11 +92,15 @@ def render_track_section(track: str, records: list[dict]) -> str:
         lines.append(f"**Host:** `{host_gpu}`")
         lines.append("")
 
-    lines.append("| Solver | Status | GW cost | Spearman | Wall (s) | GPU peak (GB) | Iterations |")
-    lines.append("|---|:---:|---:|---:|---:|---:|---:|")
+    lines.append("| N×K | Solver | Status | GW cost | Spearman | Wall (s) | GPU peak (GB) | Iterations |")
+    lines.append("|---|---|:---:|---:|---:|---:|---:|---:|")
     for r in records:
         solver = r.get("solver", "?")
         status = r.get("status", "?")
+        ds = r.get("dataset", {}) or {}
+        n_src = ds.get("n_source")
+        n_tgt = ds.get("n_target")
+        scale_cell = f"{n_src}×{n_tgt}" if (n_src and n_tgt) else "—"
         metrics = r.get("metrics", {}) or {}
         correctness = metrics.get("correctness", {}) or {}
         task = metrics.get("task", {}) or {}
@@ -105,7 +109,7 @@ def render_track_section(track: str, records: list[dict]) -> str:
         status_cell = {"ok": "✓", "fail": "✗ FAIL", "skip": "⊘ skip"}.get(status, status)
 
         row = (
-            f"| `{solver}` | {status_cell} | "
+            f"| {scale_cell} | `{solver}` | {status_cell} | "
             f"{_fmt(correctness.get('gw_cost'), '.4f')} | "
             f"{_fmt(task.get('spearman_arclen'), '.4f')} | "
             f"{_fmt(efficiency.get('wall_s'), '.2f')} | "
@@ -114,8 +118,8 @@ def render_track_section(track: str, records: list[dict]) -> str:
         )
         lines.append(row)
 
-        if status == "fail" and r.get("error"):
-            lines.append(f"|     | error: `{r['error']}` |||||||")
+        if status in ("fail", "skip") and r.get("error"):
+            lines.append(f"|     |     | note: `{r['error']}` ||||||")
 
     lines.append("")
     return "\n".join(lines)
