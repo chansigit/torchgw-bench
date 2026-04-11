@@ -316,7 +316,11 @@ def main() -> None:
         "target_dim": 3,
     }
 
-    out_path = args.out / f"core_01_foundation__{args.solver}__seed{args.seed}.json"
+    out_path = args.out / (
+        f"core_01_foundation__{args.solver}"
+        f"__n{args.n_source}k{args.n_target}"
+        f"__seed{args.seed}.json"
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # POT memory guard — must check before entering the solver try block
