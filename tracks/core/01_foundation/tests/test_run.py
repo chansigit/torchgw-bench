@@ -35,3 +35,25 @@ def test_sample_swiss_roll_shape():
     assert Y.shape == (500, 3)
     assert angles.shape == (500,)
     assert np.isfinite(Y).all()
+
+
+# ---- metric: Spearman on arclength --------------------------------------
+
+def test_arclen_spearman_perfect_identity():
+    """Diagonal transport plan + equal angles -> Spearman = 1."""
+    n = 50
+    src_angles = np.linspace(0, 9, n)
+    tgt_angles = np.linspace(0, 9, n)
+    T = np.eye(n) / n
+    rho = run.arclen_spearman(T, src_angles, tgt_angles)
+    assert pytest.approx(rho, abs=1e-6) == 1.0
+
+
+def test_arclen_spearman_reverse_permutation():
+    """A reverse-diagonal transport plan -> Spearman = -1."""
+    n = 50
+    src_angles = np.linspace(0, 9, n)
+    tgt_angles = np.linspace(0, 9, n)
+    T = np.fliplr(np.eye(n)) / n
+    rho = run.arclen_spearman(T, src_angles, tgt_angles)
+    assert pytest.approx(rho, abs=1e-6) == -1.0

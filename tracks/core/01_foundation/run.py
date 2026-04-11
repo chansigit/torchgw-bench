@@ -51,6 +51,23 @@ def sample_swiss_roll(n: int, noise: float = 0.05, seed: int = 1) -> tuple[np.nd
     return points, angles
 
 
+from scipy.stats import spearmanr
+
+
+def arclen_spearman(T: np.ndarray, src_angles: np.ndarray, tgt_angles: np.ndarray) -> float:
+    """Spearman rank correlation between source and matched-target arclengths.
+
+    For each source row i, pick the target column j* = argmax_j T[i,j], then
+    compute Spearman rho between src_angles and tgt_angles[j*] over all i.
+    Perfect identity matching => 1.0; reverse matching => -1.0.
+    """
+    assert T.shape[0] == src_angles.shape[0]
+    assert T.shape[1] == tgt_angles.shape[0]
+    matched = tgt_angles[np.argmax(T, axis=1)]
+    rho, _ = spearmanr(src_angles, matched)
+    return float(rho)
+
+
 def main() -> None:
     raise NotImplementedError("main() is implemented in a later task")
 
