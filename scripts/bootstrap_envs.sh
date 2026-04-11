@@ -25,15 +25,12 @@ if ! command -v mamba >/dev/null 2>&1; then
     exit 1
 fi
 
-# Ensure conda functions are available in this shell for 'conda run'
-# shellcheck source=/dev/null
-source "$(conda info --base)/etc/profile.d/conda.sh"
 
 for f in "$REPO_ROOT"/envs/*.yaml; do
     name="$(basename "$f" .yaml)"
     env_name="tgwbench-$name"
 
-    if conda env list | awk '{print $1}' | grep -qx "$env_name"; then
+    if mamba env list | awk '{print $1}' | grep -qx "$env_name"; then
         echo "[bootstrap] Updating existing env: $env_name"
         mamba env update -f "$f" -n "$env_name"
     else
@@ -42,8 +39,8 @@ for f in "$REPO_ROOT"/envs/*.yaml; do
     fi
 
     echo "[bootstrap] Installing torchgw (editable) into $env_name from $TORCHGW_SRC"
-    conda run -n "$env_name" pip install -e "$TORCHGW_SRC"
+    mamba run -n "$env_name" pip install -e "$TORCHGW_SRC"
 done
 
 echo "[bootstrap] Done. Created/updated envs:"
-conda env list | grep '^tgwbench-' || true
+mamba env list | grep '^tgwbench-' || true
