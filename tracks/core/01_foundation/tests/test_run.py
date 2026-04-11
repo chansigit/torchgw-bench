@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import run  # noqa: E402  — sys.path set by conftest.py
+import run  # type: ignore[import-not-found]  # noqa: E402  — sys.path set by conftest.py
 
 
 # ---- data generators ----------------------------------------------------

@@ -13,7 +13,10 @@ added in Task 10 once all helpers exist.
 """
 from __future__ import annotations
 
+import time
+
 import numpy as np
+from scipy.stats import spearmanr
 
 
 def sample_spiral(n: int, noise: float = 0.05, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
@@ -51,11 +54,6 @@ def sample_swiss_roll(n: int, noise: float = 0.05, seed: int = 1) -> tuple[np.nd
     return points, angles
 
 
-import time
-
-from scipy.stats import spearmanr
-
-
 def arclen_spearman(T: np.ndarray, src_angles: np.ndarray, tgt_angles: np.ndarray) -> float:
     """Spearman rank correlation between source and matched-target arclengths.
 
@@ -66,8 +64,14 @@ def arclen_spearman(T: np.ndarray, src_angles: np.ndarray, tgt_angles: np.ndarra
     assert T.shape[0] == src_angles.shape[0]
     assert T.shape[1] == tgt_angles.shape[0]
     matched = tgt_angles[np.argmax(T, axis=1)]
-    rho, _ = spearmanr(src_angles, matched)
-    return float(rho)
+    # scipy.stats.spearmanr returns a SignificanceResult (statistic/pvalue) in
+    # modern scipy; older versions exposed it via .correlation. Using .statistic
+    # with an attribute fallback keeps both working.
+    result = spearmanr(src_angles, matched)
+    rho = getattr(result, "statistic", None)
+    if rho is None:
+        rho = result.correlation  # type: ignore[attr-defined]
+    return float(np.asarray(rho, dtype=float).item())
 
 
 def get_host_info() -> dict:
@@ -78,7 +82,11 @@ def get_host_info() -> dict:
         info["torch"] = torch.__version__
         if torch.cuda.is_available():
             info["gpu"] = torch.cuda.get_device_name(0)
-            info["cuda"] = torch.version.cuda
+            # torch.version is a runtime submodule that isn't declared in the
+            # official type stubs; fetch via vars() to avoid a pyright
+            # reportAttributeAccessIssue on the literal attribute access.
+            _version_mod = vars(torch).get("version")
+            info["cuda"] = getattr(_version_mod, "cuda", None) if _version_mod else None
     except ImportError:
         pass
     try:
