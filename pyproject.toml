@@ -1,0 +1,26 @@
+# This pyproject.toml exists ONLY to configure developer tools (pytest, ruff, isort).
+# torchgw-bench is NOT an installable Python package. There is no shared Python
+# library across tracks — each track is self-contained.
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = [
+    "tracks",
+    "scripts",
+]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["data", "results", "artifacts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]  # lines handled by line-length
+
+[tool.isort]
+profile = "black"
+line_length = 100
