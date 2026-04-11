@@ -123,6 +123,77 @@ def build_record(track: str, solver: str, seed: int, subset: str) -> dict:
     }
 
 
+def run_torchgw_landmark(
+    X: np.ndarray,
+    Y: np.ndarray,
+    seed: int = 0,
+    epsilon: float = 5e-3,
+    M: int = 80,
+    max_iter: int = 300,
+) -> dict:
+    """Run torchgw sampled_gw with landmark distance mode and mixed precision.
+
+    Returns a dict with:
+        T (ndarray): (N, K) transport plan
+        gw_cost (float): reported from solver log
+        marginal_error (float): max|T@1 - 1/N|
+        wall_s (float): wall clock of the solver call
+        gpu_peak_gb (float or None): torch.cuda.max_memory_allocated in GB
+        iterations (int): outer GW iterations from solver log
+        hyperparams (dict): echo of the chosen hyperparameters
+        solver_version (str): torchgw version string
+    """
+    import torch
+    from torchgw import sampled_gw
+    import torchgw as _torchgw
+
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.synchronize()
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    t0 = time.perf_counter()
+    T, log = sampled_gw(
+        X, Y,
+        distance_mode="landmark",
+        mixed_precision=True,
+        M=M,
+        epsilon=epsilon,
+        max_iter=max_iter,
+        log=True,
+        verbose=False,
+    )
+    if use_cuda:
+        torch.cuda.synchronize()
+    wall_s = time.perf_counter() - t0
+
+    T_np = T.detach().cpu().numpy() if hasattr(T, "detach") else np.asarray(T)
+    marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - 1.0 / T_np.shape[0])))
+    gpu_peak_gb = (
+        torch.cuda.max_memory_allocated() / (1024 ** 3) if use_cuda else None
+    )
+
+    return {
+        "T": T_np,
+        "gw_cost": float(log.get("gw_cost", float("nan"))),
+        "marginal_error": marginal_error,
+        "wall_s": wall_s,
+        "gpu_peak_gb": gpu_peak_gb,
+        "iterations": int(log.get("n_iter", log.get("iterations", 0))),
+        "hyperparams": {
+            "M": M,
+            "epsilon": epsilon,
+            "max_iter": max_iter,
+            "distance_mode": "landmark",
+            "mixed_precision": True,
+        },
+        "solver_version": f"torchgw=={getattr(_torchgw, '__version__', 'unknown')}",
+    }
+
+
 def main() -> None:
     raise NotImplementedError("main() is implemented in a later task")
 

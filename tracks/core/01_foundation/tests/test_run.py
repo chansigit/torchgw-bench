@@ -93,3 +93,21 @@ def test_build_record_timestamp_is_utc_iso8601():
     rec = run.build_record(track="t", solver="s", seed=0, subset="full")
     # e.g. 2026-04-10T14:32:00Z
     assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", rec["timestamp"])
+
+
+# ---- torchgw solver wrapper --------------------------------------------
+
+def test_run_torchgw_landmark_returns_expected_fields():
+    """Sanity check: wrapper runs at a tiny scale and returns a full result dict."""
+    X, _ = run.sample_spiral(n=60, seed=0)
+    Y, _ = run.sample_swiss_roll(n=80, seed=1)
+    result = run.run_torchgw_landmark(X, Y, seed=0)
+    # Expected keys from the wrapper contract
+    for key in ("T", "gw_cost", "marginal_error", "wall_s", "gpu_peak_gb",
+                "iterations", "hyperparams", "solver_version"):
+        assert key in result, f"missing key: {key}"
+    # Transport plan shape matches (N, K)
+    assert result["T"].shape == (60, 80)
+    # Iterations should be at least 1
+    assert result["iterations"] >= 1
+    assert result["wall_s"] > 0
