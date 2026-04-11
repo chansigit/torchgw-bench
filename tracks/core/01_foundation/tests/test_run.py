@@ -127,3 +127,18 @@ def test_run_pot_entropic_returns_expected_fields():
     assert result["gpu_peak_gb"] is None   # POT runs on CPU
     assert result["wall_s"] > 0
     assert np.isfinite(result["gw_cost"])
+
+
+# ---- POT memory guard ---------------------------------------------------
+
+def test_pot_too_large_returns_true_above_threshold():
+    assert run.pot_too_large(n_source=6000, n_target=7000, threshold=5000) is True
+
+
+def test_pot_too_large_returns_false_below_threshold():
+    assert run.pot_too_large(n_source=400, n_target=500, threshold=5000) is False
+
+
+def test_pot_too_large_exact_threshold_is_ok():
+    # max(5000, 4000) == 5000, not strictly greater → should NOT skip
+    assert run.pot_too_large(n_source=5000, n_target=4000, threshold=5000) is False

@@ -208,6 +208,17 @@ def run_torchgw_landmark(
     }
 
 
+def pot_too_large(n_source: int, n_target: int, threshold: int = 5_000) -> bool:
+    """Return True if POT's O(N²) cost matrices would exceed the memory guard.
+
+    POT's entropic_gromov_wasserstein builds two dense float64 (N×N) and
+    (K×K) cost matrices. At threshold=5_000, the larger matrix is
+    5000×5000×8 bytes = 200 MB, which is borderline acceptable. Above that
+    the risk of OOM or multi-minute wall time grows rapidly.
+    """
+    return max(n_source, n_target) > threshold
+
+
 def run_pot_entropic(
     X: np.ndarray,
     Y: np.ndarray,
@@ -307,6 +318,17 @@ def main() -> None:
 
     out_path = args.out / f"core_01_foundation__{args.solver}__seed{args.seed}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # POT memory guard — must check before entering the solver try block
+    if args.solver == "pot-entropic" and pot_too_large(args.n_source, args.n_target):
+        rec["status"] = "skip"
+        rec["error"] = (
+            f"skipped: POT O(N²) memory guard "
+            f"(max(N,K)={max(args.n_source, args.n_target)} > 5000)"
+        )
+        out_path.write_text(json.dumps(rec, indent=2))
+        print(f"[C1] skipped (POT memory guard) → {out_path}")
+        return
 
     try:
         X, src_angles = sample_spiral(args.n_source, seed=args.seed)
