@@ -1,0 +1,21 @@
+name: tgwbench-base
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch>=2.0
+  - torchvision
+  - pytorch-cuda=12.4
+  - numpy
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - pandas
+  - joblib
+  - jinja2
+  - pytest
+  - pip:
+      - pot
