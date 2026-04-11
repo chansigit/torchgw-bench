@@ -66,17 +66,20 @@ def render_track_section(track: str, records: list[dict]) -> str:
     lines.append("")
 
     ds_name = next(
-        (r.get("dataset", {}).get("name") for r in records if r.get("dataset", {}).get("name")),
+        ((r.get("dataset") or {}).get("name") for r in records
+         if (r.get("dataset") or {}).get("name")),
         None,
     )
     if ds_name:
         lines.append(f"**Dataset:** `{ds_name}`")
     n_source = next(
-        (r.get("dataset", {}).get("n_source") for r in records if r.get("dataset", {}).get("n_source")),
+        ((r.get("dataset") or {}).get("n_source") for r in records
+         if (r.get("dataset") or {}).get("n_source")),
         None,
     )
     n_target = next(
-        (r.get("dataset", {}).get("n_target") for r in records if r.get("dataset", {}).get("n_target")),
+        ((r.get("dataset") or {}).get("n_target") for r in records
+         if (r.get("dataset") or {}).get("n_target")),
         None,
     )
     if n_source and n_target:
