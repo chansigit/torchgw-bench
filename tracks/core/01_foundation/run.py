@@ -72,7 +72,11 @@ def arclen_spearman(T: np.ndarray, src_angles: np.ndarray, tgt_angles: np.ndarra
     rho = getattr(result, "statistic", None)
     if rho is None:
         rho = result.correlation  # type: ignore[attr-defined]
-    return float(np.asarray(rho, dtype=float).item())
+    # GW is invariant to orientation (reflection/reversal), so both the
+    # forward (rho ≈ +1) and reverse (rho ≈ -1) solutions are valid optima.
+    # We report |rho| so that the metric is always in [0, 1] and a threshold
+    # of ≥0.95 unambiguously captures alignment quality.
+    return float(abs(float(np.asarray(rho, dtype=float).item())))
 
 
 def get_host_info() -> dict:

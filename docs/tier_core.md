@@ -10,12 +10,20 @@ python scripts/make_report.py --format docs --out docs/
 
 ## Core Track: `core/01_foundation`
 
-**Dataset:** `spiral_400_swissroll_500`
-**Scale:** N=400, K=500
+**Dataset:** `spiral_10000_swissroll_12000`
+**Scale:** N=10000, K=12000
 
 **Host:** `NVIDIA H100 80GB HBM3`
 
-| Solver | Status | GW cost | Spearman | Wall (s) | GPU peak (GB) | Iterations |
-|---|:---:|---:|---:|---:|---:|---:|
-| `pot-entropic` | ✓ | 0.0060 | 0.9994 | 2.27 | — | 3 |
-| `torchgw-landmark` | ✓ | 0.0010 | 0.9989 | 7.08 | 0.04 | 300 |
+| N×K | Solver | Status | GW cost | Spearman | Wall (s) | GPU peak (GB) | Iterations |
+|---|---|:---:|---:|---:|---:|---:|---:|
+| 10000×12000 | `pot-entropic` | ⊘ skip | — | — | — | — | — |
+|     |     | note: `skipped: POT O(N²) memory guard (max(N,K)=12000 > 5000)` ||||||
+| 20000×25000 | `pot-entropic` | ⊘ skip | — | — | — | — | — |
+|     |     | note: `skipped: POT O(N²) memory guard (max(N,K)=25000 > 5000)` ||||||
+| 4000×5000 | `pot-entropic` | ✓ | 0.0060 | 0.9938 | 193.98 | — | 3 |
+| 400×500 | `pot-entropic` | ✓ | 0.0060 | 0.9994 | 2.02 | — | 3 |
+| 10000×12000 | `torchgw-landmark` | ✓ | 0.0241 | 0.9995 | 4.68 | 3.62 | 59 |
+| 20000×25000 | `torchgw-landmark` | ✓ | 0.0043 | 0.9993 | 9.76 | 14.96 | 51 |
+| 4000×5000 | `torchgw-landmark` | ✓ | 0.0010 | 0.9995 | 8.54 | 0.56 | 300 |
+| 400×500 | `torchgw-landmark` | ✓ | 0.0010 | 0.9989 | 6.16 | 0.04 | 300 |
