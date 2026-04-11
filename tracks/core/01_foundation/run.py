@@ -14,6 +14,7 @@ added in Task 10 once all helpers exist.
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import numpy as np
 from scipy.stats import spearmanr
@@ -156,6 +157,8 @@ def run_torchgw_landmark(
     np.random.seed(seed)
 
     t0 = time.perf_counter()
+    # sampled_gw has no typed log=True overload in torchgw stubs, so the
+    # return type is inferred as Tensor rather than tuple[Tensor, dict].
     T, log = sampled_gw(  # type: ignore[misc]
         X, Y,
         distance_mode="landmark",
@@ -230,18 +233,21 @@ def run_pot_entropic(
         log=True,
         verbose=False,
     )
+    pot_log: dict[str, Any] = {}
     if isinstance(T_and_log, tuple):
-        T, pot_log = T_and_log
+        T, _raw_log = T_and_log
+        if isinstance(_raw_log, dict):
+            pot_log = _raw_log
     else:
         T = T_and_log
-        pot_log = {}
     wall_s = time.perf_counter() - t0
 
     T_np = np.asarray(T, dtype=np.float64)
     marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - p)))
-    gw_cost = float(pot_log.get("gw_dist", float("nan")))  # type: ignore
-    err_list: list = pot_log.get("err") or []  # type: ignore[assignment]
-    iterations = len(err_list) if err_list else max_iter
+    gw_cost = float(pot_log.get("gw_dist", float("nan")))
+    err_list: list = pot_log.get("err") or []
+    # Use -1 when "err" key is absent so unknown iteration count is explicit.
+    iterations = len(err_list) if err_list else -1
 
     return {
         "T": T_np,

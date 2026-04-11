@@ -111,6 +111,7 @@ def test_run_torchgw_landmark_returns_expected_fields():
     # Iterations should be at least 1
     assert result["iterations"] >= 1
     assert result["wall_s"] > 0
+    assert np.isfinite(result["gw_cost"])
 
 
 # ---- POT entropic GW baseline ------------------------------------------
@@ -125,3 +126,4 @@ def test_run_pot_entropic_returns_expected_fields():
     assert result["T"].shape == (60, 80)
     assert result["gpu_peak_gb"] is None   # POT runs on CPU
     assert result["wall_s"] > 0
+    assert np.isfinite(result["gw_cost"])
