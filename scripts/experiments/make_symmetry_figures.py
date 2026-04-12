@@ -68,24 +68,24 @@ def make_datasets_figure() -> Path:
     ax.set_aspect("equal")
     plt.colorbar(sc, ax=ax, label="θ feature", shrink=0.8)
 
-    # C3 source (branched spiral)
+    # C3 source (spiral + tangential tail)
     X3, a3, L3 = c3.sample_branched_spiral(n=400, seed=0)
     ax = fig.add_subplot(2, 3, 4)
     ax.scatter(X3[L3 == 0, 0], X3[L3 == 0, 1], c="steelblue", s=10, label="main")
-    ax.scatter(X3[L3 == 1, 0], X3[L3 == 1, 1], c="crimson", s=14, marker="^",
-               label="branch")
-    ax.set_title("C3 source: branched 2D spiral")
+    ax.scatter(X3[L3 == 1, 0], X3[L3 == 1, 1], c="crimson", s=14, marker="s",
+               label="tail")
+    ax.set_title("C3 source: spiral + tangential tail\n(at outer end, θ=9)")
     ax.set_aspect("equal")
     ax.legend(loc="lower left", fontsize=8)
 
-    # C3 target (branched swiss roll)
+    # C3 target (swiss roll + tail)
     Y3, b3, L3t = c3.sample_branched_swiss_roll(n=500, seed=1)
     ax = fig.add_subplot(2, 3, 5, projection="3d")
     ax.scatter(Y3[L3t == 0, 0], Y3[L3t == 0, 2], Y3[L3t == 0, 1],
                c="steelblue", s=10, label="main")
     ax.scatter(Y3[L3t == 1, 0], Y3[L3t == 1, 2], Y3[L3t == 1, 1],
-               c="crimson", s=14, marker="^", label="branch")
-    ax.set_title("C3 target: branched Swiss roll")
+               c="crimson", s=14, marker="s", label="tail")
+    ax.set_title("C3 target: Swiss roll + tail")
     ax.view_init(elev=20, azim=-60)
     ax.legend(loc="upper right", fontsize=8)
 
@@ -98,7 +98,7 @@ def make_datasets_figure() -> Path:
             "    (forward / reverse)\n\n"
             "C2: same geometry + θ feature\n"
             "    → FGW breaks tie via feature W\n\n"
-            "C3: non-symmetric geometry\n"
+            "C3: asymmetric geometry (single tail)\n"
             "    → pure GW forward-only",
             fontsize=11, family="monospace", verticalalignment="center")
 
@@ -182,12 +182,12 @@ def make_matchings_figure() -> Path:
     main_mask = (Ls == 0)
     rho_main = spearmanr(a[main_mask], matched_theta[main_mask]).statistic
     sc3 = axes[3].scatter(X[:, 0], X[:, 1], c=matched_theta,
-                          cmap="plasma", s=12, vmin=0, vmax=9)
-    # Mark branch points
+                          cmap="plasma", s=12, vmin=0, vmax=9.8)
+    # Mark tail points
     axes[3].scatter(X[Ls == 1, 0], X[Ls == 1, 1], facecolors="none",
-                    edgecolors="crimson", s=35, linewidths=1.2,
-                    label="branch points")
-    axes[3].set_title(f"C3 branched (N=400): pure GW\nmain-Spearman = {rho_main:+.3f}",
+                    edgecolors="crimson", s=45, linewidths=1.2,
+                    marker="s", label="tail points")
+    axes[3].set_title(f"C3 tailed (N=400): pure GW\nmain-Spearman = {rho_main:+.3f}",
                       fontsize=11)
     axes[3].set_aspect("equal")
     axes[3].legend(loc="lower left", fontsize=8)
@@ -251,7 +251,7 @@ def make_spearman_bar_figure() -> Path:
     matched = b[np.argmax(T, axis=1)]
     main_mask = (Ls == 0)
     signed_rho = float(spearmanr(a[main_mask], matched[main_mask]).statistic)
-    results.append(("C3 branched\nN=400", signed_rho))
+    results.append(("C3 tailed\nN=400", signed_rho))
 
     labels = [r[0] for r in results]
     signed = [r[1] for r in results]
@@ -312,9 +312,9 @@ def make_c3_zoom_figure() -> Path:
     # Panel 1: C3 source labelled
     ax = fig.add_subplot(1, 4, 1)
     ax.scatter(X[Ls == 0, 0], X[Ls == 0, 1], c="steelblue", s=12, label="main")
-    ax.scatter(X[Ls == 1, 0], X[Ls == 1, 1], c="crimson", s=18, marker="^",
-               label="branch")
-    ax.set_title("C3 source (2D)\nspiral + perpendicular branch at θ=6")
+    ax.scatter(X[Ls == 1, 0], X[Ls == 1, 1], c="crimson", s=18, marker="s",
+               label="tail")
+    ax.set_title("C3 source (2D)\nspiral + tangential tail at θ=9")
     ax.set_aspect("equal")
     ax.legend(loc="lower left", fontsize=9)
 
@@ -323,17 +323,17 @@ def make_c3_zoom_figure() -> Path:
     ax.scatter(Y[Lt == 0, 0], Y[Lt == 0, 2], Y[Lt == 0, 1],
                c="steelblue", s=10, label="main")
     ax.scatter(Y[Lt == 1, 0], Y[Lt == 1, 2], Y[Lt == 1, 1],
-               c="crimson", s=16, marker="^", label="branch")
-    ax.set_title("C3 target (3D)\nSwiss roll + branch")
+               c="crimson", s=16, marker="s", label="tail")
+    ax.set_title("C3 target (3D)\nSwiss roll + tail")
     ax.view_init(elev=20, azim=-60)
     ax.legend(loc="upper right", fontsize=9)
 
     # Panel 3: source coloured by matched target θ
     ax = fig.add_subplot(1, 4, 3)
     sc = ax.scatter(X[:, 0], X[:, 1], c=matched_theta, cmap="plasma",
-                     s=14, vmin=0, vmax=9)
+                     s=14, vmin=0, vmax=9.8)
     ax.scatter(X[Ls == 1, 0], X[Ls == 1, 1], facecolors="none",
-               edgecolors="crimson", s=45, linewidths=1.4)
+               edgecolors="crimson", s=50, linewidths=1.4, marker="s")
     ax.set_title(f"matched target θ\nmain-Spearman = {rho_main:+.4f}")
     ax.set_aspect("equal")
     plt.colorbar(sc, ax=ax, label="matched target θ", shrink=0.8)
@@ -349,7 +349,7 @@ def make_c3_zoom_figure() -> Path:
     ax.set_aspect("equal")
     ax.legend(loc="lower left", fontsize=9)
 
-    fig.suptitle("C3 — branched geometry + pure GW: deterministic forward matching",
+    fig.suptitle("C3 — single tangential tail at θ=9 + pure GW: deterministic forward matching",
                  fontsize=13, y=1.02)
     fig.tight_layout()
     out = FIG_DIR / "c3_detail.png"

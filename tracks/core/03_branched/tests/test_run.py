@@ -28,14 +28,19 @@ def test_sample_branched_swiss_roll_shape_and_labels():
     assert abs(labels.sum() - 30) <= 1
 
 
-def test_branched_spiral_branch_points_near_theta_branch():
-    """Branch points should start near the spiral position at theta_branch."""
-    pts, angles, labels = run.sample_branched_spiral(n=200, branch_frac=0.3,
-                                                      theta_branch=6.0, seed=0)
-    # Branch angles should all be >= theta_branch (== theta_branch + s, s >= 0.02)
-    branch_angles = angles[labels == 1]
-    assert branch_angles.min() >= 6.0
-    assert branch_angles.max() <= 6.0 + 0.4 + 0.01  # branch_len=0.4 + small tolerance
+def test_branched_spiral_tail_points_extend_beyond_spiral_end():
+    """Tail points have angle > theta_tail_start and lie outside the main spiral."""
+    pts, angles, labels = run.sample_branched_spiral(
+        n=200, branch_frac=0.3, theta_tail_start=9.0, tail_len=0.8, seed=0,
+    )
+    tail_angles = angles[labels == 1]
+    # Tail parametric angles live in (theta_tail_start, theta_tail_start + tail_len]
+    assert tail_angles.min() > 9.0
+    assert tail_angles.max() <= 9.0 + 0.8 + 1e-6
+    # Spatially the tail should NOT coincide with the main spiral end — the
+    # mean tail point should sit further than r_max=1.0 from origin.
+    tail_pts = pts[labels == 1]
+    assert np.linalg.norm(tail_pts.mean(axis=0)) > 1.0
 
 
 # ---- metrics ------------------------------------------------------------

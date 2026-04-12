@@ -15,9 +15,10 @@ We tested two independent fixes:
 1. **C2 — Fused GW.** Attach the arclength parameter θ to each point as a
    scalar feature, then run FGW. The Wasserstein term on features pins down
    the orientation.
-2. **C3 — Branched geometry.** Give the spiral and the Swiss roll a matching
-   side-branch at a fixed θ. The geometry itself is no longer
-   reversal-symmetric, so pure GW converges to the forward match deterministically.
+2. **C3 — Asymmetric geometry.** Append a tangential tail to the outer end of
+   both the spiral and the Swiss roll. The two endpoints now have different
+   local geometry (tight spiral curvature at θ=0 vs. a straight line beyond
+   θ=9), so pure GW converges to the forward match deterministically.
 
 Both work. Both give +0.999 Spearman on the same seed where C1 at N=10k
 flips to −0.999.
@@ -36,10 +37,11 @@ flips to −0.999.
 - **C2** (top right): identical data to C1, but θ is passed to the solver as
   a per-point feature. The cost matrix M ∈ ℝ^(N×K) is the squared-Euclidean
   distance between source θ and target θ, normalised.
-- **C3** (bottom row): branched versions of both manifolds. A short side-branch
-  starts at θ_branch = 6 in the direction perpendicular to the spiral
-  tangent and propagates for 0.4 units. `branch_frac = 0.3` of the points
-  go on the branch; the rest stay on the main arc.
+- **C3** (bottom row): a **tail** is appended to the outer end of each
+  manifold. At θ=9 the spiral's local tangent is evaluated, and a straight
+  segment of length 0.8 extends along that direction. `branch_frac = 0.2`
+  of the points sit on the tail; the rest stay on the main spiral arc.
+  The same construction is applied in 3D (with an independent z).
 
 All experiments use `torchgw.sampled_gw(distance_mode="landmark")` with the
 same hyperparameters (`M=80, k=5, n_landmarks=50, epsilon=5e-3, max_iter=300`)
@@ -103,47 +105,50 @@ term). Just a different dataset.
 ![c3_detail](../figures/c3_detail.png)
 
 The four panels trace C3 end-to-end: (1) the 2D source with main-arc
-(blue) and branch (red triangles) labelled, (2) the 3D target with the
-same labels, (3) source points coloured by the argmax-matched target θ
-(the smooth colour ramp from purple at the inner spiral to yellow at the
-outer rim confirms forward matching), and (4) per-point label
-propagation — green = `src_label == tgt_label[argmax(T, 1)]`, red × =
-mismatch. The 28 mismatches all cluster at the tip of the branch, where
-the source has slightly more points than the target in that radial band,
-so a few branch-source points get mapped onto the nearest main-arc target
-and are flagged as label errors.
+(blue) and tail (red squares, extending tangentially from the outer
+spiral endpoint at θ=9), (2) the 3D target with the same labels, (3)
+source points coloured by the argmax-matched target θ — the smooth colour
+ramp from purple at the inner spiral to yellow at the tail tip confirms
+forward matching end-to-end, and (4) per-point label propagation: green =
+`src_label == tgt_label[argmax(T, 1)]`, red × = mismatch. Only 3 of 400
+source points are flagged as label errors, and they all sit right at the
+spiral / tail junction where the two regions meet.
 
 | Metric                     | Value    |
 |----------------------------|---------:|
-| `task.branch_accuracy`     | 0.9300   |
-| `task.main_arclen_spearman`| **+0.9989** |
-| Wall                       | 5.92s    |
+| `task.branch_accuracy`     | **0.9925** |
+| `task.main_arclen_spearman`| **+0.9994** |
+| Wall                       | 7.61s    |
 
 `branch_accuracy` is the fraction of source points whose argmax-matched
 target carries the same branch label (main vs. branch).
 `main_arclen_spearman` is Spearman-ρ computed on the main-arc source points
 only (signed, no abs).
 
-Mechanism: the branch-on-branch, main-on-main constraint is geometrically
-cheaper than branch-on-main. A reverse match would send branch-labelled
-source points to main-labelled target points in the lower-θ end of the
-spiral, incurring a large GW cost because the branch on each side sits at
-an essentially unique structural position.
+Mechanism: the two endpoints of the manifold are now locally different.
+The inner spiral endpoint (θ=0) sits at small radius and high curvature;
+the tail tip (θ=9+tail_len) sits on a straight line. A forward match
+pairs high-curvature source points to high-curvature target points and
+line points to line points, which is structurally compatible. A reverse
+match would try to send the inner spiral endpoint to the tail tip and
+vice versa — these regions have very different local distance
+distributions, so GW rejects that pairing.
 
-In the rightmost panel of the matchings figure, the red-circled branch
-points map cleanly to their θ≈6 neighbourhood on the target, and the main
-arc's colour ramp is the standard forward sweep.
+In the rightmost panel of the matchings figure, the red-boxed tail points
+fall in the "matched θ ≈ 9+" region (yellow end of the plasma colourmap),
+and the main arc sweeps smoothly from blue (θ=0) through yellow (θ=9), a
+textbook forward correspondence.
 
 ## Comparison
 
-|                           | C1 (baseline)    | C2 (FGW)                     | C3 (branched)              |
+|                           | C1 (baseline)    | C2 (FGW)                     | C3 (tailed)                |
 |---------------------------|:----------------:|:----------------------------:|:--------------------------:|
 | Dataset                   | symmetric        | symmetric                    | **asymmetric**             |
 | Method                    | **pure GW**      | fused GW                     | pure GW                    |
 | Orientation at N=400      | forward (+0.999) | forward (+0.999 / +0.999)    | forward (+0.999)           |
 | Orientation at N=10k      | **reverse** (−0.999) | — (not yet run)           | — (not yet run)            |
 | Extra metric needed?      | `|ρ|`            | none                         | `branch_accuracy`, main-ρ  |
-| Extra dataset complexity? | none             | θ feature                    | branch generator + labels  |
+| Extra dataset complexity? | none             | θ feature                    | tail generator + labels    |
 | Extra solver complexity?  | none             | fused API + feature cost     | none                       |
 
 ## What's next
