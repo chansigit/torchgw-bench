@@ -68,26 +68,36 @@ def make_datasets_figure() -> Path:
     ax.set_aspect("equal")
     plt.colorbar(sc, ax=ax, label="θ feature", shrink=0.8)
 
-    # C3 source (spiral + Y-fork of two tails)
+    # C3 source (spiral + asymmetric Y of two tails)
     X3, a3, L3 = c3.sample_branched_spiral(n=400, seed=0)
     ax = fig.add_subplot(2, 3, 4)
-    ax.scatter(X3[L3 == 0, 0], X3[L3 == 0, 1], c="steelblue", s=10, label="main")
-    ax.scatter(X3[L3 == 1, 0], X3[L3 == 1, 1], c="crimson", s=14, marker="s",
-               label="Y-fork (2 tails)")
-    ax.set_title("C3 source: spiral + Y-fork\n(two tails at outer end, θ=9)")
+    main3 = (L3 == 0) & (a3 <= 9.0)
+    t1_3 = (L3 == 0) & (a3 > 9.0)
+    t2_3 = (L3 == 1)
+    ax.scatter(X3[main3, 0], X3[main3, 1], c="steelblue", s=10, label="main (lbl 0)")
+    ax.scatter(X3[t1_3, 0], X3[t1_3, 1], c="mediumseagreen", s=12,
+               label="tail 1 tangent (lbl 0)")
+    ax.scatter(X3[t2_3, 0], X3[t2_3, 1], c="crimson", s=14, marker="s",
+               label="tail 2 +30° (lbl 1)")
+    ax.set_title("C3 source: asymmetric Y-fork\nlong tangent tail + shorter branch")
     ax.set_aspect("equal")
-    ax.legend(loc="lower left", fontsize=8)
+    ax.legend(loc="lower left", fontsize=7)
 
     # C3 target (swiss roll + Y-fork)
     Y3, b3, L3t = c3.sample_branched_swiss_roll(n=500, seed=1)
     ax = fig.add_subplot(2, 3, 5, projection="3d")
-    ax.scatter(Y3[L3t == 0, 0], Y3[L3t == 0, 2], Y3[L3t == 0, 1],
+    main3t = (L3t == 0) & (b3 <= 9.0)
+    t1_3t = (L3t == 0) & (b3 > 9.0)
+    t2_3t = (L3t == 1)
+    ax.scatter(Y3[main3t, 0], Y3[main3t, 2], Y3[main3t, 1],
                c="steelblue", s=10, label="main")
-    ax.scatter(Y3[L3t == 1, 0], Y3[L3t == 1, 2], Y3[L3t == 1, 1],
-               c="crimson", s=14, marker="s", label="Y-fork (2 tails)")
-    ax.set_title("C3 target: Swiss roll + Y-fork")
+    ax.scatter(Y3[t1_3t, 0], Y3[t1_3t, 2], Y3[t1_3t, 1],
+               c="mediumseagreen", s=12, label="tail 1")
+    ax.scatter(Y3[t2_3t, 0], Y3[t2_3t, 2], Y3[t2_3t, 1],
+               c="crimson", s=14, marker="s", label="tail 2")
+    ax.set_title("C3 target: Swiss roll + asymmetric Y")
     ax.view_init(elev=20, azim=-60)
-    ax.legend(loc="upper right", fontsize=8)
+    ax.legend(loc="upper right", fontsize=7)
 
     # Empty panel annotating the logic
     ax = fig.add_subplot(2, 3, 6)
@@ -98,9 +108,11 @@ def make_datasets_figure() -> Path:
             "    (forward / reverse)\n\n"
             "C2: same geometry + θ feature\n"
             "    → FGW breaks tie via feature W\n\n"
-            "C3: asymmetric geometry (Y-fork)\n"
-            "    two outward-opening tails only\n"
-            "    at one end\n"
+            "C3: asymmetric Y-fork\n"
+            "    tail 1 (long, along tangent,\n"
+            "            part of main backbone)\n"
+            "    tail 2 (short, +30° off-axis,\n"
+            "            the true branch)\n"
             "    → pure GW forward-only",
             fontsize=11, family="monospace", verticalalignment="center")
 
@@ -306,37 +318,56 @@ def make_c3_zoom_figure() -> Path:
     matched_label = Lt[np.argmax(T, axis=1)]
 
     main_mask = (Ls == 0)
+    tail_mask = (Ls == 1)
     rho_main = float(spearmanr(a[main_mask], matched_theta[main_mask]).statistic)
+    rho_tail = float(spearmanr(a[tail_mask], matched_theta[tail_mask]).statistic)
     branch_acc = float(np.mean(Ls == matched_label))
 
     fig = plt.figure(figsize=(16, 5))
 
-    # Panel 1: C3 source labelled
+    # Panel 1: C3 source labelled (three regions: main, tail1, tail2)
     ax = fig.add_subplot(1, 4, 1)
-    ax.scatter(X[Ls == 0, 0], X[Ls == 0, 1], c="steelblue", s=12, label="main")
-    ax.scatter(X[Ls == 1, 0], X[Ls == 1, 1], c="crimson", s=18, marker="s",
-               label="Y-fork tails")
-    ax.set_title("C3 source (2D)\nspiral + Y-fork at θ=9")
+    # Main arc (label 0, θ ≤ 9)
+    main_arc = (Ls == 0) & (a <= 9.0)
+    tail1 = (Ls == 0) & (a > 9.0)
+    tail2 = (Ls == 1)
+    ax.scatter(X[main_arc, 0], X[main_arc, 1], c="steelblue", s=12,
+               label="main spiral (label 0)")
+    ax.scatter(X[tail1, 0], X[tail1, 1], c="mediumseagreen", s=14,
+               label="tail 1 (tangent, label 0)")
+    ax.scatter(X[tail2, 0], X[tail2, 1], c="crimson", s=18, marker="s",
+               label="tail 2 (+30°, label 1)")
+    ax.set_title("C3 source (2D)\nasymmetric Y: tail 1 long, tail 2 short + off-axis")
     ax.set_aspect("equal")
-    ax.legend(loc="lower left", fontsize=9)
+    ax.legend(loc="lower left", fontsize=8)
 
     # Panel 2: C3 target labelled (3D)
     ax = fig.add_subplot(1, 4, 2, projection="3d")
-    ax.scatter(Y[Lt == 0, 0], Y[Lt == 0, 2], Y[Lt == 0, 1],
+    main_arc_t = (Lt == 0) & (b <= 9.0)
+    tail1_t = (Lt == 0) & (b > 9.0)
+    tail2_t = (Lt == 1)
+    ax.scatter(Y[main_arc_t, 0], Y[main_arc_t, 2], Y[main_arc_t, 1],
                c="steelblue", s=10, label="main")
-    ax.scatter(Y[Lt == 1, 0], Y[Lt == 1, 2], Y[Lt == 1, 1],
-               c="crimson", s=16, marker="s", label="Y-fork tails")
-    ax.set_title("C3 target (3D)\nSwiss roll + Y-fork")
+    ax.scatter(Y[tail1_t, 0], Y[tail1_t, 2], Y[tail1_t, 1],
+               c="mediumseagreen", s=12, label="tail 1")
+    ax.scatter(Y[tail2_t, 0], Y[tail2_t, 2], Y[tail2_t, 1],
+               c="crimson", s=14, marker="s", label="tail 2")
+    ax.set_title("C3 target (3D)\nSwiss roll + asymmetric Y")
     ax.view_init(elev=20, azim=-60)
-    ax.legend(loc="upper right", fontsize=9)
+    ax.legend(loc="upper right", fontsize=8)
 
     # Panel 3: source coloured by matched target θ
     ax = fig.add_subplot(1, 4, 3)
-    sc = ax.scatter(X[:, 0], X[:, 1], c=matched_theta, cmap="plasma",
-                     s=14, vmin=0, vmax=10.0)
-    ax.scatter(X[Ls == 1, 0], X[Ls == 1, 1], facecolors="none",
-               edgecolors="crimson", s=50, linewidths=1.4, marker="s")
-    ax.set_title(f"matched target θ\nmain-Spearman = {rho_main:+.4f}")
+    sc = ax.scatter(X[Ls == 0, 0], X[Ls == 0, 1],
+                     c=matched_theta[Ls == 0], cmap="plasma",
+                     s=14, vmin=0, vmax=10.5)
+    # Tail 2 uses its own parameter; show it in crimson outline
+    ax.scatter(X[tail2, 0], X[tail2, 1], c=matched_theta[tail2],
+               cmap="plasma", vmin=0, vmax=10.5, s=18, marker="s",
+               edgecolors="crimson", linewidths=1.2)
+    ax.set_title(f"matched target θ\n"
+                  f"main-Spearman = {rho_main:+.4f}\n"
+                  f"tail-Spearman = {rho_tail:+.4f}")
     ax.set_aspect("equal")
     plt.colorbar(sc, ax=ax, label="matched target θ", shrink=0.8)
 
@@ -351,7 +382,7 @@ def make_c3_zoom_figure() -> Path:
     ax.set_aspect("equal")
     ax.legend(loc="lower left", fontsize=9)
 
-    fig.suptitle("C3 — Y-fork at θ=9 (two outward tails) + pure GW: deterministic forward matching",
+    fig.suptitle("C3 — asymmetric Y-fork (long tangent tail 1 + short 30°-offset tail 2) + pure GW",
                  fontsize=13, y=1.02)
     fig.tight_layout()
     out = FIG_DIR / "c3_detail.png"

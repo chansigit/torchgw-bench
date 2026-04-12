@@ -15,8 +15,9 @@ def test_sample_branched_spiral_shape_and_labels():
     assert angles.shape == (100,)
     assert labels.shape == (100,)
     assert set(np.unique(labels).tolist()) == {0, 1}
-    # Branch fraction should be approximately 0.3
-    assert abs(labels.sum() - 30) <= 1
+    # Only tail 2 carries label 1. With branch_frac=0.3 and tail1_len=1.2,
+    # tail2_len=0.6 (default), tail 2 gets 0.6/(1.2+0.6) = 1/3 of 30 points ≈ 10.
+    assert 5 <= int(labels.sum()) <= 15
 
 
 def test_sample_branched_swiss_roll_shape_and_labels():
@@ -25,26 +26,30 @@ def test_sample_branched_swiss_roll_shape_and_labels():
     assert angles.shape == (100,)
     assert labels.shape == (100,)
     assert set(np.unique(labels).tolist()) == {0, 1}
-    assert abs(labels.sum() - 30) <= 1
+    assert 5 <= int(labels.sum()) <= 15
 
 
-def test_branched_spiral_yfork_has_two_tails():
-    """Both tails open outward from the spiral (lie beyond r=1)."""
+def test_asymmetric_yfork_tail1_longer_than_tail2():
+    """Tail 1 (along tangent, label 0) spatially reaches further than tail 2."""
     pts, _angles, labels = run.sample_branched_spiral(
-        n=200, branch_frac=0.3, theta_tail_start=9.0, tail_len=0.6,
-        fork_angle=np.pi / 3, noise=0.0, seed=0,
+        n=400, branch_frac=0.3,
+        tail1_len=1.2, tail2_len=0.6, tail2_angle=np.pi / 6,
+        noise=0.0, seed=0,
     )
-    tail_pts = pts[labels == 1]
-    # All tail points should sit outside the spiral's outer radius (r=1),
-    # since both tails open in the outward half-plane.
-    assert np.all(np.linalg.norm(tail_pts, axis=1) > 1.0 - 1e-3)
-    # The two tails should be spatially distinguishable: the maximum pairwise
-    # distance among tail points should exceed a single tail's span.
-    max_dist = float(np.max(np.linalg.norm(
-        tail_pts[:, None, :] - tail_pts[None, :, :], axis=-1,
-    )))
-    # Two tails of length 0.6 with 60° opening: end-to-end separation = 2·0.6·sin(30°) = 0.6
-    assert max_dist > 0.5
+    fork_base = np.array([np.cos(9.0), np.sin(9.0)], dtype=np.float32)
+    # Distance from fork base to tail-2 points (label==1)
+    d2 = np.linalg.norm(pts[labels == 1] - fork_base, axis=1).max()
+    # Tail 1 lives in label==0 (mixed with the main spiral); its farthest
+    # point from the fork base should exceed tail1_len-ε.
+    d1 = np.linalg.norm(pts[labels == 0] - fork_base, axis=1).max()
+    assert d1 > d2 + 0.4  # tail1_len - tail2_len = 0.6, allow slack
+    # Tail 2 reach should be ~ tail2_len
+    assert 0.4 < d2 < 0.8
+
+
+def test_main_and_tail_label_counts_sum_to_n():
+    pts, _a, labels = run.sample_branched_spiral(n=500, branch_frac=0.2, seed=0)
+    assert (labels == 0).sum() + (labels == 1).sum() == 500
 
 
 # ---- metrics ------------------------------------------------------------
@@ -56,6 +61,36 @@ def test_branch_accuracy_perfect_identity():
     tgt_labels = np.array([0] * 35 + [1] * 15)
     T = np.eye(n) / n
     assert pytest.approx(run.branch_accuracy(T, src_labels, tgt_labels), abs=1e-9) == 1.0
+
+
+def test_tail_arclen_spearman_perfect_identity():
+    """Identity T on tail-2 points should give +1."""
+    n = 30
+    src_angles = np.concatenate((np.linspace(0, 9, 20), np.linspace(0.1, 0.6, 10)))
+    tgt_angles = np.concatenate((np.linspace(0, 9, 20), np.linspace(0.1, 0.6, 10)))
+    src_labels = np.array([0] * 20 + [1] * 10)
+    tgt_labels = np.array([0] * 20 + [1] * 10)
+    T = np.eye(n) / n
+    rho = run.tail_arclen_spearman(T, src_angles, src_labels, tgt_angles, tgt_labels)
+    assert pytest.approx(rho, abs=1e-6) == 1.0
+
+
+def test_tail_arclen_spearman_reverse_gives_negative():
+    """Reversing the tail-to-tail mapping should give signed -1."""
+    n = 30
+    src_angles = np.concatenate((np.linspace(0, 9, 20), np.linspace(0.1, 0.6, 10)))
+    tgt_angles = np.concatenate((np.linspace(0, 9, 20), np.linspace(0.1, 0.6, 10)))
+    src_labels = np.array([0] * 20 + [1] * 10)
+    tgt_labels = np.array([0] * 20 + [1] * 10)
+    T = np.zeros((n, n))
+    # Main identity
+    for i in range(20):
+        T[i, i] = 1.0 / n
+    # Tail reverse: src row 20+i → tgt col (29 - i) = 29 - i (mirror within tail)
+    for i in range(10):
+        T[20 + i, 29 - i] = 1.0 / n
+    rho = run.tail_arclen_spearman(T, src_angles, src_labels, tgt_angles, tgt_labels)
+    assert pytest.approx(rho, abs=1e-6) == -1.0
 
 
 def test_branch_accuracy_all_mismatched():

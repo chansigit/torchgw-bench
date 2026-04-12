@@ -14,65 +14,73 @@ from scipy.stats import spearmanr
 
 # ---- branched data generators -------------------------------------------
 
-def _two_tail_directions(
-    theta_tail_start: float, fork_angle: float,
-) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Return unit vectors for two tails opening symmetrically around the outward
-    radial at θ=theta_tail_start.
+def _spiral_tangent(theta_end: float, r_max: float = 1.0, r_min: float = 0.3,
+                     theta_max: float = 9.0) -> tuple[float, float]:
+    """Unit tangent to r(θ)·(cos θ, sin θ) at θ=theta_end, pointing outward in θ."""
+    dr_dtheta = (r_max - r_min) / theta_max
+    dx = dr_dtheta * np.cos(theta_end) - r_max * np.sin(theta_end)
+    dy = dr_dtheta * np.sin(theta_end) + r_max * np.cos(theta_end)
+    norm = float(np.sqrt(dx * dx + dy * dy))
+    return float(dx / norm), float(dy / norm)
 
-    On a tight spiral, the tangent at the outer end is nearly perpendicular to
-    the radial direction, so rotating ± half the fork angle *around the tangent*
-    can send one tail back towards the origin. Using the radial (outward)
-    direction as the symmetry axis guarantees both tails move strictly outward
-    (r increases), giving a V that opens away from the spiral.
+
+def _asymmetric_tail_directions(
+    theta_tail_start: float, tail2_angle: float,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Return unit vectors for the two (asymmetric) tails.
+
+    Tail 1 goes along the spiral's local tangent at θ=theta_tail_start — the
+    "curve continuation" direction. Tail 2 is tail 1 rotated by `tail2_angle`
+    towards the outward radial direction (so tail 2 splays away from the
+    spiral body rather than curling back onto it).
     """
+    tx, ty = _spiral_tangent(theta_tail_start)
     rx = float(np.cos(theta_tail_start))
     ry = float(np.sin(theta_tail_start))
-    half = fork_angle / 2.0
-    c_neg, s_neg = float(np.cos(-half)), float(np.sin(-half))
-    c_pos, s_pos = float(np.cos(half)), float(np.sin(half))
-    dA_x = rx * c_neg - ry * s_neg
-    dA_y = rx * s_neg + ry * c_neg
-    dB_x = rx * c_pos - ry * s_pos
-    dB_y = rx * s_pos + ry * c_pos
-    return (dA_x, dA_y), (dB_x, dB_y)
+    # Sign convention: rotate tangent by an amount whose sign points toward
+    # the outward radial. If cross(tangent, radial) > 0, radial is CCW from
+    # tangent, so rotate by +tail2_angle; else rotate by -tail2_angle.
+    cross = tx * ry - ty * rx
+    rot = tail2_angle if cross > 0 else -tail2_angle
+    c = float(np.cos(rot))
+    s = float(np.sin(rot))
+    d2x = tx * c - ty * s
+    d2y = tx * s + ty * c
+    return (tx, ty), (d2x, d2y)
 
 
-def sample_branched_spiral(
+def _build_branched_manifold(
     n: int,
-    branch_frac: float = 0.3,
-    theta_tail_start: float = 9.0,
-    tail_len: float = 0.6,
-    fork_angle: float = np.pi / 3,
-    noise: float = 0.05,
-    seed: int = 0,
+    *,
+    embed_3d: bool,
+    branch_frac: float,
+    theta_tail_start: float,
+    tail1_len: float,
+    tail2_len: float,
+    tail2_angle: float,
+    noise: float,
+    seed: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """2D spiral with a Y-fork: two tails diverging from the outer end (θ=9).
+    """Shared backbone for spiral (2D) and Swiss-roll (3D) Y-fork datasets.
 
-    Main arc: C1 spiral on θ ∈ [0, theta_tail_start].
-    Tail A: straight segment along the local tangent at θ=theta_tail_start.
-    Tail B: straight segment at angle `fork_angle` from tail A (same origin).
-
-    Both tails have the same length (`tail_len`). The two branches together
-    hold `branch_frac * n` points, split evenly. The inner end (θ=0) is a
-    single spiral terminus (no fork), so the two ends of the manifold have
-    very different local geometries — this is what breaks GW's reversal tie.
-
-    Returns:
-        points: (n, 2) float32
-        angles: (n,) float64 — main: θ ∈ [0, theta_tail_start];
-                tail A: θ = theta_tail_start + s;
-                tail B: θ = theta_tail_start + tail_len + s (offset for
-                        monotone ordering when sorting)
-        labels: (n,) int — 0 = main, 1 = tail (either A or B)
+    Layout:
+        main spiral (θ ∈ [0, theta_tail_start]) + tail 1 (tangent continuation)
+        together carry label 0 and form one continuous arc parameterised by
+        θ ∈ [0, theta_tail_start + tail1_len].
+        tail 2 (splayed 30° outward from tail 1) carries label 1 and has its
+        own parametric variable s ∈ (0, tail2_len].
     """
     rng = np.random.default_rng(seed)
     n_tail_total = int(round(n * branch_frac))
     n_main = n - n_tail_total
-    n_A = n_tail_total // 2
-    n_B = n_tail_total - n_A
 
-    # Main spiral: same parameterisation as C1
+    # Split tail points between tail 1 and tail 2 proportionally to length
+    # so the linear density stays roughly uniform.
+    total_tail_len = tail1_len + tail2_len
+    n_t1 = int(round(n_tail_total * tail1_len / max(total_tail_len, 1e-9)))
+    n_t2 = n_tail_total - n_t1
+
+    # Main spiral
     radius = np.linspace(0.3, 1.0, n_main)
     angles_main = np.linspace(0.0, theta_tail_start, n_main)
     eps = rng.normal(size=(2, n_main)) * noise
@@ -82,102 +90,114 @@ def sample_branched_spiral(
     # Fork origin (outer spiral endpoint)
     base_x = 1.0 * np.cos(theta_tail_start)
     base_y = 1.0 * np.sin(theta_tail_start)
-    (dA_x, dA_y), (dB_x, dB_y) = _two_tail_directions(theta_tail_start, fork_angle)
+    (d1x, d1y), (d2x, d2y) = _asymmetric_tail_directions(theta_tail_start, tail2_angle)
 
-    def _tail_points(n_points: int, dx: float, dy: float
+    def _tail_points(n_points: int, dx: float, dy: float, tlen: float
                       ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if n_points <= 0:
             return np.zeros(0), np.zeros(0), np.zeros(0)
-        s = np.linspace(tail_len / n_points, tail_len, n_points)
+        s = np.linspace(tlen / n_points, tlen, n_points)
         eps_t = rng.normal(size=(2, n_points)) * noise
         xs = base_x + s * dx + eps_t[0]
         ys = base_y + s * dy + eps_t[1]
         return xs, ys, s
 
-    xA, yA, sA = _tail_points(n_A, dA_x, dA_y)
-    xB, yB, sB = _tail_points(n_B, dB_x, dB_y)
-    angles_A = theta_tail_start + sA
-    angles_B = theta_tail_start + tail_len + sB  # shift so sort order is stable
+    x1, y1, s1 = _tail_points(n_t1, d1x, d1y, tail1_len)
+    x2, y2, s2 = _tail_points(n_t2, d2x, d2y, tail2_len)
 
-    points = np.concatenate(
-        (np.stack((x_main, y_main), axis=1),
-         np.stack((xA, yA), axis=1),
-         np.stack((xB, yB), axis=1)),
-        axis=0,
-    ).astype(np.float32)
-    angles = np.concatenate((angles_main, angles_A, angles_B))
+    # Angle conventions:
+    #   tail 1 continues the spiral parameterisation: θ = theta_tail_start + s
+    #   tail 2 uses its own parameter s (will be filtered by label anyway)
+    angles_t1 = theta_tail_start + s1
+    angles_t2 = s2.copy()
+
+    # Labels: main + tail1 = 0 (the "backbone" arc); tail2 = 1 (the true branch)
     labels = np.concatenate((
         np.zeros(n_main, dtype=np.int64),
-        np.ones(n_A, dtype=np.int64),
-        np.ones(n_B, dtype=np.int64),
+        np.zeros(n_t1, dtype=np.int64),
+        np.ones(n_t2, dtype=np.int64),
     ))
+
+    if embed_3d:
+        z_main = rng.uniform(size=n_main)
+        z1 = rng.uniform(size=n_t1)
+        z2 = rng.uniform(size=n_t2)
+        # C1 swiss-roll layout is (x, z, y)
+        pts_main = np.stack((x_main, z_main, y_main), axis=1)
+        pts_t1 = np.stack((x1, z1, y1), axis=1)
+        pts_t2 = np.stack((x2, z2, y2), axis=1)
+        points = np.concatenate((pts_main, pts_t1, pts_t2), axis=0).astype(np.float32)
+    else:
+        points = np.concatenate(
+            (np.stack((x_main, y_main), axis=1),
+             np.stack((x1, y1), axis=1),
+             np.stack((x2, y2), axis=1)),
+            axis=0,
+        ).astype(np.float32)
+
+    angles = np.concatenate((angles_main, angles_t1, angles_t2))
     return points, angles, labels
+
+
+def sample_branched_spiral(
+    n: int,
+    branch_frac: float = 0.3,
+    theta_tail_start: float = 9.0,
+    tail1_len: float = 1.2,
+    tail2_len: float = 0.6,
+    tail2_angle: float = np.pi / 6,
+    noise: float = 0.05,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """2D spiral with an asymmetric Y-fork at the outer end (θ=9).
+
+    Tail 1 extends along the spiral's local tangent (the "curve continuation"
+    direction) for `tail1_len` units. Tail 2 is a shorter branch, rotated
+    `tail2_angle` away from tail 1 toward the outward radial, with length
+    `tail2_len < tail1_len`. Point counts are allocated proportionally to
+    length so the linear density stays roughly uniform.
+
+    Labels: main spiral + tail 1 = 0 (a continuous "backbone" arc),
+            tail 2 = 1 (the off-axis branch). Forward matching therefore
+            requires src-label-0 to land on tgt-label-0 and src-label-1 to
+            land on tgt-label-1 across the Y.
+
+    Returns:
+        points: (n, 2) float32
+        angles: (n,) float64 — main + tail1 share a common parameterisation
+                θ ∈ [0, theta_tail_start + tail1_len]; tail2 uses its own
+                parameter s ∈ (0, tail2_len].
+        labels: (n,) int — 0 = main+tail1 backbone, 1 = tail2 branch
+    """
+    return _build_branched_manifold(
+        n, embed_3d=False,
+        branch_frac=branch_frac, theta_tail_start=theta_tail_start,
+        tail1_len=tail1_len, tail2_len=tail2_len, tail2_angle=tail2_angle,
+        noise=noise, seed=seed,
+    )
 
 
 def sample_branched_swiss_roll(
     n: int,
     branch_frac: float = 0.3,
     theta_tail_start: float = 9.0,
-    tail_len: float = 0.6,
-    fork_angle: float = np.pi / 3,
+    tail1_len: float = 1.2,
+    tail2_len: float = 0.6,
+    tail2_angle: float = np.pi / 6,
     noise: float = 0.05,
     seed: int = 1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """3D Swiss roll with a Y-fork at the outer edge (θ=9).
+    """3D Swiss roll with an asymmetric Y-fork — same shape as the 2D spiral
+    but with an independent uniform z coordinate per point.
 
-    Same construction as sample_branched_spiral but embedded in 3D with an
-    independent uniform z coordinate per point.
-
-    Returns:
-        points: (n, 3) float32 — layout (x, z, y) as in C1 swiss_roll
-        angles, labels: same semantics as sample_branched_spiral
+    See `sample_branched_spiral` for label/angle conventions.
     """
-    rng = np.random.default_rng(seed)
-    n_tail_total = int(round(n * branch_frac))
-    n_main = n - n_tail_total
-    n_A = n_tail_total // 2
-    n_B = n_tail_total - n_A
-
-    # Main Swiss roll
-    radius = np.linspace(0.3, 1.0, n_main)
-    angles_main = np.linspace(0.0, theta_tail_start, n_main)
-    eps = rng.normal(size=(2, n_main)) * noise
-    x_main = (radius + eps[0]) * np.cos(angles_main)
-    y_main = (radius + eps[1]) * np.sin(angles_main)
-    z_main = rng.uniform(size=n_main)
-
-    # Fork origin
-    base_x = 1.0 * np.cos(theta_tail_start)
-    base_y = 1.0 * np.sin(theta_tail_start)
-    (dA_x, dA_y), (dB_x, dB_y) = _two_tail_directions(theta_tail_start, fork_angle)
-
-    def _tail_points(n_points: int, dx: float, dy: float
-                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        if n_points <= 0:
-            return np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0)
-        s = np.linspace(tail_len / n_points, tail_len, n_points)
-        eps_t = rng.normal(size=(2, n_points)) * noise
-        xs = base_x + s * dx + eps_t[0]
-        ys = base_y + s * dy + eps_t[1]
-        zs = rng.uniform(size=n_points)
-        return xs, ys, zs, s
-
-    xA, yA, zA, sA = _tail_points(n_A, dA_x, dA_y)
-    xB, yB, zB, sB = _tail_points(n_B, dB_x, dB_y)
-    angles_A = theta_tail_start + sA
-    angles_B = theta_tail_start + tail_len + sB
-
-    pts_main = np.stack((x_main, z_main, y_main), axis=1)
-    pts_A = np.stack((xA, zA, yA), axis=1)
-    pts_B = np.stack((xB, zB, yB), axis=1)
-    points = np.concatenate((pts_main, pts_A, pts_B), axis=0).astype(np.float32)
-    angles = np.concatenate((angles_main, angles_A, angles_B))
-    labels = np.concatenate((
-        np.zeros(n_main, dtype=np.int64),
-        np.ones(n_A, dtype=np.int64),
-        np.ones(n_B, dtype=np.int64),
-    ))
-    return points, angles, labels
+    return _build_branched_manifold(
+        n, embed_3d=True,
+        branch_frac=branch_frac, theta_tail_start=theta_tail_start,
+        tail1_len=tail1_len, tail2_len=tail2_len, tail2_angle=tail2_angle,
+        noise=noise, seed=seed,
+    )
 
 
 # ---- metrics ------------------------------------------------------------
@@ -190,24 +210,54 @@ def branch_accuracy(T: np.ndarray, src_labels: np.ndarray, tgt_labels: np.ndarra
     return float(np.mean(src_labels == matched))
 
 
+def _signed_spearman_on_subset(
+    T: np.ndarray,
+    src_angles: np.ndarray,
+    src_mask: np.ndarray,
+    tgt_angles: np.ndarray,
+) -> float:
+    if src_mask.sum() < 2:
+        return float("nan")
+    matched = tgt_angles[np.argmax(T, axis=1)]
+    result = spearmanr(src_angles[src_mask], matched[src_mask])
+    rho = getattr(result, "statistic", None)
+    if rho is None:
+        rho = result.correlation  # type: ignore[attr-defined]
+    return float(np.asarray(rho, dtype=float).item())
+
+
 def main_arclen_spearman(
     T: np.ndarray,
     src_angles: np.ndarray,
     src_labels: np.ndarray,
     tgt_angles: np.ndarray,
-    tgt_labels: np.ndarray,  # noqa: ARG001 — kept for symmetry with branch_accuracy
+    tgt_labels: np.ndarray,  # noqa: ARG001 — accepted for interface symmetry
 ) -> float:
-    """Signed Spearman rho on main-branch source points only (label == 0)."""
-    del tgt_labels  # unused; accepted for interface symmetry
-    main_mask = (src_labels == 0)
-    if main_mask.sum() < 2:
-        return float("nan")
-    matched = tgt_angles[np.argmax(T, axis=1)]
-    result = spearmanr(src_angles[main_mask], matched[main_mask])
-    rho = getattr(result, "statistic", None)
-    if rho is None:
-        rho = result.correlation  # type: ignore[attr-defined]
-    return float(np.asarray(rho, dtype=float).item())
+    """Signed Spearman rho on the "backbone" (main spiral + tail 1, label == 0).
+
+    The backbone is a continuous curve parameterised by θ ∈ [0, 9 + tail1_len],
+    so a forward match should give +1 here.
+    """
+    del tgt_labels
+    return _signed_spearman_on_subset(T, src_angles, src_labels == 0, tgt_angles)
+
+
+def tail_arclen_spearman(
+    T: np.ndarray,
+    src_angles: np.ndarray,
+    src_labels: np.ndarray,
+    tgt_angles: np.ndarray,
+    tgt_labels: np.ndarray,  # noqa: ARG001
+) -> float:
+    """Signed Spearman rho on the off-axis branch (tail 2, label == 1).
+
+    Tail 2 uses its own parameter s ∈ (0, tail2_len]. A clean branch match
+    (source tail 2 → target tail 2, monotone in s) gives +1. A mismatch
+    (e.g. source tail 2 mapped onto target main arc) gives a value whose
+    sign and magnitude depend on how far the match drifts.
+    """
+    del tgt_labels
+    return _signed_spearman_on_subset(T, src_angles, src_labels == 1, tgt_angles)
 
 
 # ---- host / record ------------------------------------------------------
@@ -333,8 +383,12 @@ def main() -> None:
     ap.add_argument("--n-target", type=int, default=500)
     ap.add_argument("--branch-frac", type=float, default=0.3)
     ap.add_argument("--theta-tail-start", type=float, default=9.0)
-    ap.add_argument("--tail-len", type=float, default=0.6)
-    ap.add_argument("--fork-angle", type=float, default=float(np.pi / 3))
+    ap.add_argument("--tail1-len", type=float, default=1.2,
+                    help="Length of tail 1 (along spiral tangent)")
+    ap.add_argument("--tail2-len", type=float, default=0.6,
+                    help="Length of tail 2 (splayed branch); must be < tail1-len")
+    ap.add_argument("--tail2-angle", type=float, default=float(np.pi / 6),
+                    help="Angle (rad) between tail 2 and tail 1; default 30°")
     args = ap.parse_args()
 
     rec = build_record(
@@ -351,8 +405,9 @@ def main() -> None:
         "target_dim": 3,
         "branch_frac": args.branch_frac,
         "theta_tail_start": args.theta_tail_start,
-        "tail_len": args.tail_len,
-        "fork_angle": args.fork_angle,
+        "tail1_len": args.tail1_len,
+        "tail2_len": args.tail2_len,
+        "tail2_angle": args.tail2_angle,
     }
 
     out_path = args.out / (
@@ -365,13 +420,15 @@ def main() -> None:
     try:
         X, src_angles, src_labels = sample_branched_spiral(
             args.n_source, branch_frac=args.branch_frac,
-            theta_tail_start=args.theta_tail_start, tail_len=args.tail_len,
-            fork_angle=args.fork_angle, seed=args.seed,
+            theta_tail_start=args.theta_tail_start,
+            tail1_len=args.tail1_len, tail2_len=args.tail2_len,
+            tail2_angle=args.tail2_angle, seed=args.seed,
         )
         Y, tgt_angles, tgt_labels = sample_branched_swiss_roll(
             args.n_target, branch_frac=args.branch_frac,
-            theta_tail_start=args.theta_tail_start, tail_len=args.tail_len,
-            fork_angle=args.fork_angle, seed=args.seed + 1,
+            theta_tail_start=args.theta_tail_start,
+            tail1_len=args.tail1_len, tail2_len=args.tail2_len,
+            tail2_angle=args.tail2_angle, seed=args.seed + 1,
         )
 
         if args.solver == "torchgw-landmark":
@@ -388,6 +445,9 @@ def main() -> None:
         rec["metrics"]["task"] = {
             "branch_accuracy": branch_accuracy(result["T"], src_labels, tgt_labels),
             "main_arclen_spearman": main_arclen_spearman(
+                result["T"], src_angles, src_labels, tgt_angles, tgt_labels,
+            ),
+            "tail_arclen_spearman": tail_arclen_spearman(
                 result["T"], src_angles, src_labels, tgt_angles, tgt_labels,
             ),
         }

@@ -1,38 +1,37 @@
 # Track: core/03_branched
 
-**Task:** Align a **spiral with a Y-fork (2D)** to a **Swiss roll with a
-Y-fork (3D)**. Two straight tails diverge symmetrically from the outer end
-of each manifold, making the two endpoints of the curve geometrically
-distinct. Pure GW converges to the forward correspondence deterministically.
+**Task:** Align a **2D spiral with an asymmetric Y-fork** to a **3D Swiss roll
+with the same Y-fork**. The spiral's outer end splits into two tails of
+different lengths and at different angles from the tangent — an
+intrinsically asymmetric geometry. The `branch_frac` label partitions the
+dataset into a "backbone" (main + tail 1) and an "off-axis branch" (tail 2).
 
 ## Why
 
 Pure GW on spiral ↔ Swiss roll (track 01) has two equivalent optima
 (forward + reverse) because both manifolds are reversal-symmetric. Track 02
 breaks the tie via FGW features. This track takes the opposite approach:
-break the tie at the **data** level by attaching a Y-fork (two diverging
-tails) to one end only. The resulting manifold is a spiral with a
-"swallow-tail" — the inner end is a single high-curvature terminus, the
-outer end is a pair of straight branches.
+break the tie at the **data** level by attaching a Y-fork with **unequal**
+tails (one long + tangential, one short + off-axis). The curve has a
+natural "main direction" (spiral continues through tail 1) plus an
+auxiliary branch (tail 2).
 
 ## Dataset
 
 - `sample_branched_spiral(n, branch_frac=0.3, theta_tail_start=9.0,
-   tail_len=0.6, fork_angle=π/3)`
+   tail1_len=1.2, tail2_len=0.6, tail2_angle=π/6)`
   - `(1 - branch_frac) * n` points on the main spiral (θ ∈ [0, 9])
-  - `branch_frac * n / 2` points on tail A and another half on tail B.
-    Both tails start at the spiral's outer endpoint (θ=9) and head outward
-    — they are the outward radial direction rotated by ±fork_angle/2.
-    Using the radial (not the tangent) as the symmetry axis guarantees both
-    tails move strictly to r > 1, so neither tail curls back onto the
-    spiral's inner body.
-  - Returns `(points (n,2), angles (n,), labels (n,) ∈ {0=main, 1=tail})`.
-    Both tails share label 1 (they are collectively the non-main region).
-- `sample_branched_swiss_roll(n, ...)` — analogous in 3D with an
-  independent z per point
-
-The function names keep the `branched` prefix for historical reasons; the
-current geometric construction is a symmetric Y-fork of two tails.
+  - `branch_frac * n / (1 + tail2_len/tail1_len)` points on **tail 1**
+    — the *curve-continuation* branch, a straight segment along the
+    spiral's local tangent at θ=9 of length `tail1_len`
+  - remaining tail points on **tail 2** — a shorter branch at angle
+    `tail2_angle` toward the outward radial, of length `tail2_len`
+  - Point density is roughly uniform along both tails
+- Labels:
+  - **0 (backbone)**: main spiral + tail 1 — together they parameterise a
+    single continuous curve with θ ∈ [0, 9 + tail1_len]
+  - **1 (off-axis branch)**: tail 2
+- `sample_branched_swiss_roll(n, ...)` — 3D analogue with independent z
 
 ## Solvers supported
 
@@ -43,6 +42,22 @@ current geometric construction is a symmetric Y-fork of two tails.
 ## Metrics
 
 - `task.branch_accuracy` — fraction of source points whose argmax-matched
-  target carries the same label (main vs. tail)
-- `task.main_arclen_spearman` — **signed** Spearman ρ on main-arc points
-  only (no `abs`); forward match gives +1, reverse would give −1
+  target carries the same label
+- `task.main_arclen_spearman` — **signed** Spearman ρ on backbone points
+  (label 0 = main + tail 1). The backbone is a monotone parametric curve,
+  so a forward match gives +1.
+- `task.tail_arclen_spearman` — **signed** Spearman ρ on the off-axis
+  branch (label 1 = tail 2) alone. Measures whether the short branch is
+  matched as a coherent region (+1) or scrambled (low / negative).
+
+## Notes on asymmetric-fork difficulty
+
+Pure GW aligns structural distances; it has no direct signal to tell
+which of two tails is the "continuation" and which is the "branch". When
+tail 1 and tail 2 are similar in scale (both around 0.6 units), GW can
+swap them — that's the symmetric-V case where `branch_accuracy` stays
+≥0.98. Once the tails become asymmetric (1.2 vs 0.6 here), the harder
+problem — matching a long tangent extension vs. a short off-axis stub —
+introduces ambiguity that pure GW cannot fully resolve from geometry
+alone. Expect `tail_arclen_spearman` to be the sensitive metric here;
+see `docs/experiments/2026-04-12-symmetry-breaking.md`.
