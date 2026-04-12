@@ -290,6 +290,74 @@ def make_spearman_bar_figure() -> Path:
     return out
 
 
+# ---- Figure 4: C3 zoom -- dedicated branched-dataset visualisation ------
+
+def make_c3_zoom_figure() -> Path:
+    """Four panels zooming into C3: source + target side-by-side with labels,
+    plus matched-θ colouring and branch-accuracy overlay."""
+    from scipy.stats import spearmanr
+
+    X, a, Ls = c3.sample_branched_spiral(n=400, seed=0)
+    Y, b, Lt = c3.sample_branched_swiss_roll(n=500, seed=1)
+    T = c3.run_torchgw_landmark(X, Y, seed=0)["T"]
+    matched_theta = b[np.argmax(T, axis=1)]
+    matched_label = Lt[np.argmax(T, axis=1)]
+
+    main_mask = (Ls == 0)
+    rho_main = float(spearmanr(a[main_mask], matched_theta[main_mask]).statistic)
+    branch_acc = float(np.mean(Ls == matched_label))
+
+    fig = plt.figure(figsize=(16, 5))
+
+    # Panel 1: C3 source labelled
+    ax = fig.add_subplot(1, 4, 1)
+    ax.scatter(X[Ls == 0, 0], X[Ls == 0, 1], c="steelblue", s=12, label="main")
+    ax.scatter(X[Ls == 1, 0], X[Ls == 1, 1], c="crimson", s=18, marker="^",
+               label="branch")
+    ax.set_title("C3 source (2D)\nspiral + perpendicular branch at θ=6")
+    ax.set_aspect("equal")
+    ax.legend(loc="lower left", fontsize=9)
+
+    # Panel 2: C3 target labelled (3D)
+    ax = fig.add_subplot(1, 4, 2, projection="3d")
+    ax.scatter(Y[Lt == 0, 0], Y[Lt == 0, 2], Y[Lt == 0, 1],
+               c="steelblue", s=10, label="main")
+    ax.scatter(Y[Lt == 1, 0], Y[Lt == 1, 2], Y[Lt == 1, 1],
+               c="crimson", s=16, marker="^", label="branch")
+    ax.set_title("C3 target (3D)\nSwiss roll + branch")
+    ax.view_init(elev=20, azim=-60)
+    ax.legend(loc="upper right", fontsize=9)
+
+    # Panel 3: source coloured by matched target θ
+    ax = fig.add_subplot(1, 4, 3)
+    sc = ax.scatter(X[:, 0], X[:, 1], c=matched_theta, cmap="plasma",
+                     s=14, vmin=0, vmax=9)
+    ax.scatter(X[Ls == 1, 0], X[Ls == 1, 1], facecolors="none",
+               edgecolors="crimson", s=45, linewidths=1.4)
+    ax.set_title(f"matched target θ\nmain-Spearman = {rho_main:+.4f}")
+    ax.set_aspect("equal")
+    plt.colorbar(sc, ax=ax, label="matched target θ", shrink=0.8)
+
+    # Panel 4: label-match (green) vs label-mismatch (red)
+    ax = fig.add_subplot(1, 4, 4)
+    correct = (Ls == matched_label)
+    ax.scatter(X[correct, 0], X[correct, 1], c="#2ca02c", s=12,
+               label=f"label matches ({correct.sum()})")
+    ax.scatter(X[~correct, 0], X[~correct, 1], c="#d62728", s=22, marker="x",
+               label=f"label mismatch ({(~correct).sum()})")
+    ax.set_title(f"branch label propagation\nbranch_accuracy = {branch_acc:.4f}")
+    ax.set_aspect("equal")
+    ax.legend(loc="lower left", fontsize=9)
+
+    fig.suptitle("C3 — branched geometry + pure GW: deterministic forward matching",
+                 fontsize=13, y=1.02)
+    fig.tight_layout()
+    out = FIG_DIR / "c3_detail.png"
+    fig.savefig(out, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
 if __name__ == "__main__":
     print("[fig] Generating datasets.png ...")
     p1 = make_datasets_figure()
@@ -300,4 +368,7 @@ if __name__ == "__main__":
     print("[fig] Generating spearman_bar.png ...")
     p3 = make_spearman_bar_figure()
     print(f"  → {p3}")
+    print("[fig] Generating c3_detail.png ...")
+    p4 = make_c3_zoom_figure()
+    print(f"  → {p4}")
     print("\nAll figures written to", FIG_DIR)

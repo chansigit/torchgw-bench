@@ -100,6 +100,19 @@ it does.
 Same hyperparameters as C1. Same solver (`torchgw-landmark`, no fused
 term). Just a different dataset.
 
+![c3_detail](../figures/c3_detail.png)
+
+The four panels trace C3 end-to-end: (1) the 2D source with main-arc
+(blue) and branch (red triangles) labelled, (2) the 3D target with the
+same labels, (3) source points coloured by the argmax-matched target θ
+(the smooth colour ramp from purple at the inner spiral to yellow at the
+outer rim confirms forward matching), and (4) per-point label
+propagation — green = `src_label == tgt_label[argmax(T, 1)]`, red × =
+mismatch. The 28 mismatches all cluster at the tip of the branch, where
+the source has slightly more points than the target in that radial band,
+so a few branch-source points get mapped onto the nearest main-arc target
+and are flagged as label errors.
+
 | Metric                     | Value    |
 |----------------------------|---------:|
 | `task.branch_accuracy`     | 0.9300   |
