@@ -1,34 +1,38 @@
 # Track: core/03_branched
 
-**Task:** Align a **spiral-with-tail (2D)** to a **Swiss-roll-with-tail (3D)**.
-A short straight tail extends tangentially from the outer end of each
-manifold, making the overall geometry intrinsically asymmetric under
-orientation reversal. Pure GW converges to the forward correspondence
-deterministically.
+**Task:** Align a **spiral with a Y-fork (2D)** to a **Swiss roll with a
+Y-fork (3D)**. Two straight tails diverge symmetrically from the outer end
+of each manifold, making the two endpoints of the curve geometrically
+distinct. Pure GW converges to the forward correspondence deterministically.
 
 ## Why
 
 Pure GW on spiral ↔ Swiss roll (track 01) has two equivalent optima
 (forward + reverse) because both manifolds are reversal-symmetric. Track 02
 breaks the tie via FGW features. This track takes the opposite approach:
-break the tie at the **data** level by appending a tangential tail to one
-end only, so the two endpoints have different local geometry (tight
-spiral-curvature vs. straight line).
+break the tie at the **data** level by attaching a Y-fork (two diverging
+tails) to one end only. The resulting manifold is a spiral with a
+"swallow-tail" — the inner end is a single high-curvature terminus, the
+outer end is a pair of straight branches.
 
 ## Dataset
 
-- `sample_branched_spiral(n, branch_frac=0.2, theta_tail_start=9.0, tail_len=0.8)`
+- `sample_branched_spiral(n, branch_frac=0.3, theta_tail_start=9.0,
+   tail_len=0.6, fork_angle=π/3)`
   - `(1 - branch_frac) * n` points on the main spiral (θ ∈ [0, 9])
-  - `branch_frac * n` points on a straight tail attached at θ=9, extending
-    along the local tangent for `tail_len` units
-  - Returns `(points (n,2), angles (n,), labels (n,) ∈ {0=main, 1=tail})`
-  - Tail-point angles are `9 + s`, preserving θ monotonicity across the
-    whole curve
-- `sample_branched_swiss_roll(n, ...)` — analogous in 3D, with an independent
-  z-coordinate drawn uniformly for every point
+  - `branch_frac * n / 2` points on tail A and another half on tail B.
+    Both tails start at the spiral's outer endpoint (θ=9) and head outward
+    — they are the outward radial direction rotated by ±fork_angle/2.
+    Using the radial (not the tangent) as the symmetry axis guarantees both
+    tails move strictly to r > 1, so neither tail curls back onto the
+    spiral's inner body.
+  - Returns `(points (n,2), angles (n,), labels (n,) ∈ {0=main, 1=tail})`.
+    Both tails share label 1 (they are collectively the non-main region).
+- `sample_branched_swiss_roll(n, ...)` — analogous in 3D with an
+  independent z per point
 
-The function names keep the `branched` prefix for legacy reasons; the
-geometric construction is a single-sided tail, not a perpendicular T-branch.
+The function names keep the `branched` prefix for historical reasons; the
+current geometric construction is a symmetric Y-fork of two tails.
 
 ## Solvers supported
 

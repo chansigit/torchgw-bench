@@ -15,10 +15,11 @@ We tested two independent fixes:
 1. **C2 — Fused GW.** Attach the arclength parameter θ to each point as a
    scalar feature, then run FGW. The Wasserstein term on features pins down
    the orientation.
-2. **C3 — Asymmetric geometry.** Append a tangential tail to the outer end of
-   both the spiral and the Swiss roll. The two endpoints now have different
-   local geometry (tight spiral curvature at θ=0 vs. a straight line beyond
-   θ=9), so pure GW converges to the forward match deterministically.
+2. **C3 — Asymmetric geometry.** Attach a Y-fork (two outward tails) to the
+   outer end of both the spiral and the Swiss roll. The two endpoints now
+   have very different local geometry (a single high-curvature terminus at
+   θ=0 vs. a split point with two diverging straight branches at θ=9), so
+   pure GW converges to the forward match deterministically.
 
 Both work. Both give +0.999 Spearman on the same seed where C1 at N=10k
 flips to −0.999.
@@ -37,11 +38,14 @@ flips to −0.999.
 - **C2** (top right): identical data to C1, but θ is passed to the solver as
   a per-point feature. The cost matrix M ∈ ℝ^(N×K) is the squared-Euclidean
   distance between source θ and target θ, normalised.
-- **C3** (bottom row): a **tail** is appended to the outer end of each
-  manifold. At θ=9 the spiral's local tangent is evaluated, and a straight
-  segment of length 0.8 extends along that direction. `branch_frac = 0.2`
-  of the points sit on the tail; the rest stay on the main spiral arc.
-  The same construction is applied in 3D (with an independent z).
+- **C3** (bottom row): a **Y-fork** — two straight tails — is attached to
+  the outer end of each manifold. At θ=9 the outward radial direction is
+  evaluated; tail A takes that direction rotated by −π/6 and tail B by
+  +π/6, so the two tails form an outward-opening V with opening angle π/3.
+  Each tail is 0.6 units long. `branch_frac = 0.3` of the points sit on
+  the Y-fork (split evenly between the two tails); the rest stay on the
+  main spiral arc. The same construction is applied in 3D (with an
+  independent z).
 
 All experiments use `torchgw.sampled_gw(distance_mode="landmark")` with the
 same hyperparameters (`M=80, k=5, n_landmarks=50, epsilon=5e-3, max_iter=300`)
@@ -104,51 +108,53 @@ term). Just a different dataset.
 
 ![c3_detail](../figures/c3_detail.png)
 
-The four panels trace C3 end-to-end: (1) the 2D source with main-arc
-(blue) and tail (red squares, extending tangentially from the outer
-spiral endpoint at θ=9), (2) the 3D target with the same labels, (3)
+The four panels trace C3 end-to-end: (1) the 2D source with main spiral
+(blue) and the Y-fork of two tails (red squares, opening outward from
+the outer endpoint at θ=9), (2) the 3D target with the same labels, (3)
 source points coloured by the argmax-matched target θ — the smooth colour
-ramp from purple at the inner spiral to yellow at the tail tip confirms
-forward matching end-to-end, and (4) per-point label propagation: green =
-`src_label == tgt_label[argmax(T, 1)]`, red × = mismatch. Only 3 of 400
-source points are flagged as label errors, and they all sit right at the
-spiral / tail junction where the two regions meet.
+ramp from purple at the inner spiral through to the bright yellow at the
+Y-fork confirms forward matching end-to-end, and (4) per-point label
+propagation: green = `src_label == tgt_label[argmax(T, 1)]`, red × =
+mismatch. 392 of 400 source points match their correct label class; the
+8 mismatches are concentrated at the spiral-fork junction where the two
+regions meet.
 
 | Metric                     | Value    |
 |----------------------------|---------:|
-| `task.branch_accuracy`     | **0.9925** |
-| `task.main_arclen_spearman`| **+0.9994** |
-| Wall                       | 7.61s    |
+| `task.branch_accuracy`     | **0.9800** |
+| `task.main_arclen_spearman`| **+0.9988** |
+| Wall                       | 7.55s    |
 
 `branch_accuracy` is the fraction of source points whose argmax-matched
 target carries the same branch label (main vs. branch).
 `main_arclen_spearman` is Spearman-ρ computed on the main-arc source points
 only (signed, no abs).
 
-Mechanism: the two endpoints of the manifold are now locally different.
-The inner spiral endpoint (θ=0) sits at small radius and high curvature;
-the tail tip (θ=9+tail_len) sits on a straight line. A forward match
-pairs high-curvature source points to high-curvature target points and
-line points to line points, which is structurally compatible. A reverse
-match would try to send the inner spiral endpoint to the tail tip and
-vice versa — these regions have very different local distance
-distributions, so GW rejects that pairing.
+Mechanism: the two endpoints of the manifold are now locally very
+different. The inner spiral endpoint (θ=0) is a single high-curvature
+terminus — one direction to leave from. The outer endpoint is a Y-fork,
+where two straight lines diverge. A forward match pairs one terminus
+with one terminus and one fork with one fork, which is structurally
+compatible. A reverse match would have to send the single-terminus inner
+end onto the target Y-fork (topologically a 1-to-2 contraction) and vice
+versa — this incurs large GW cost because the local neighbourhood sizes
+are fundamentally different. So the solver picks forward every time.
 
-In the rightmost panel of the matchings figure, the red-boxed tail points
-fall in the "matched θ ≈ 9+" region (yellow end of the plasma colourmap),
-and the main arc sweeps smoothly from blue (θ=0) through yellow (θ=9), a
-textbook forward correspondence.
+In the rightmost panel of the matchings figure, the red-boxed Y-fork
+points all land at the yellow end of the plasma colourmap (matched θ ≈
+9–10, i.e. the target Y-fork), and the main arc sweeps smoothly from
+blue (θ=0) through orange (θ=9) — a textbook forward correspondence.
 
 ## Comparison
 
-|                           | C1 (baseline)    | C2 (FGW)                     | C3 (tailed)                |
+|                           | C1 (baseline)    | C2 (FGW)                     | C3 (Y-fork)                |
 |---------------------------|:----------------:|:----------------------------:|:--------------------------:|
 | Dataset                   | symmetric        | symmetric                    | **asymmetric**             |
 | Method                    | **pure GW**      | fused GW                     | pure GW                    |
 | Orientation at N=400      | forward (+0.999) | forward (+0.999 / +0.999)    | forward (+0.999)           |
 | Orientation at N=10k      | **reverse** (−0.999) | — (not yet run)           | — (not yet run)            |
 | Extra metric needed?      | `|ρ|`            | none                         | `branch_accuracy`, main-ρ  |
-| Extra dataset complexity? | none             | θ feature                    | tail generator + labels    |
+| Extra dataset complexity? | none             | θ feature                    | Y-fork generator + labels  |
 | Extra solver complexity?  | none             | fused API + feature cost     | none                       |
 
 ## What's next

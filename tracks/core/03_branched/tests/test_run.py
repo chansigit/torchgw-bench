@@ -28,19 +28,23 @@ def test_sample_branched_swiss_roll_shape_and_labels():
     assert abs(labels.sum() - 30) <= 1
 
 
-def test_branched_spiral_tail_points_extend_beyond_spiral_end():
-    """Tail points have angle > theta_tail_start and lie outside the main spiral."""
-    pts, angles, labels = run.sample_branched_spiral(
-        n=200, branch_frac=0.3, theta_tail_start=9.0, tail_len=0.8, seed=0,
+def test_branched_spiral_yfork_has_two_tails():
+    """Both tails open outward from the spiral (lie beyond r=1)."""
+    pts, _angles, labels = run.sample_branched_spiral(
+        n=200, branch_frac=0.3, theta_tail_start=9.0, tail_len=0.6,
+        fork_angle=np.pi / 3, noise=0.0, seed=0,
     )
-    tail_angles = angles[labels == 1]
-    # Tail parametric angles live in (theta_tail_start, theta_tail_start + tail_len]
-    assert tail_angles.min() > 9.0
-    assert tail_angles.max() <= 9.0 + 0.8 + 1e-6
-    # Spatially the tail should NOT coincide with the main spiral end — the
-    # mean tail point should sit further than r_max=1.0 from origin.
     tail_pts = pts[labels == 1]
-    assert np.linalg.norm(tail_pts.mean(axis=0)) > 1.0
+    # All tail points should sit outside the spiral's outer radius (r=1),
+    # since both tails open in the outward half-plane.
+    assert np.all(np.linalg.norm(tail_pts, axis=1) > 1.0 - 1e-3)
+    # The two tails should be spatially distinguishable: the maximum pairwise
+    # distance among tail points should exceed a single tail's span.
+    max_dist = float(np.max(np.linalg.norm(
+        tail_pts[:, None, :] - tail_pts[None, :, :], axis=-1,
+    )))
+    # Two tails of length 0.6 with 60° opening: end-to-end separation = 2·0.6·sin(30°) = 0.6
+    assert max_dist > 0.5
 
 
 # ---- metrics ------------------------------------------------------------
