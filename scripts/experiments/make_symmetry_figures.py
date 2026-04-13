@@ -174,105 +174,115 @@ def _bundle_closest(
 # ---- Figure 1: dataset showcase (3D source → 2D target) -----------------
 
 def make_datasets_figure() -> Path:
-    # Source is 3D swiss roll (Y-fork); target is 2D spiral (Y-fork).
-    X, a_src, L_src = c3.sample_branched_swiss_roll(n=500, seed=0)
-    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=400, seed=1)
+    """Per-region showcase: each row zooms into one region (main spiral /
+    long tail / short tail) with 3D source on the left, 2D target on the
+    right, and parameter-matched correspondence lines linking them.
+
+    The other two regions appear as faint grey background in every panel
+    so the reader keeps the overall shape in mind.
+    """
+    N_SRC, N_TGT = 1400, 1200  # denser point clouds per user request
+    X, a_src, L_src = c3.sample_branched_swiss_roll(n=N_SRC, seed=0)
+    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=N_TGT, seed=1)
     arclen_max = float(max(a_src.max(), a_tgt.max()))
     fork_s = float(c3.spiral_arclen(9.0).item())
-
-    # 3D source needs display-order coords (swiss_roll returns (x, z, y)):
     X_display = np.stack((X[:, 0], X[:, 2], X[:, 1]), axis=1)
 
-    fig = plt.figure(figsize=(14, 6.5))
-    gs = GridSpec(1, 2, figure=fig, wspace=0.18)
-
-    # Left: 3D source (swiss roll + Y-fork)
-    ax_src = fig.add_subplot(gs[0, 0], projection="3d")
-    _overlay_swiss_roll_surface(ax_src, vmax=arclen_max)
-    base_x = float(np.cos(9.0)); base_y = float(np.sin(9.0))
-    (d1x, d1y), (d2x, d2y) = c3._asymmetric_tail_directions(9.0, np.pi / 6)
-    _overlay_tail_strip(ax_src, (base_x, base_y), (d1x, d1y), length=1.2)
-    _overlay_tail_strip(ax_src, (base_x, base_y), (d2x, d2y), length=0.6)
-
+    # Region masks
     src_main = (L_src == 0) & (a_src <= fork_s + 1e-6)
     src_long = (L_src == 0) & (a_src > fork_s + 1e-6)
     src_short = (L_src == 1)
-    ax_src.scatter(X_display[src_main, 0], X_display[src_main, 1],
-                    X_display[src_main, 2], c=a_src[src_main],
-                    cmap=DATA_CMAP, s=14, vmin=0, vmax=arclen_max,
-                    marker="o", label="main spiral",
-                    edgecolors="black", linewidths=0.25)
-    ax_src.scatter(X_display[src_long, 0], X_display[src_long, 1],
-                    X_display[src_long, 2], c=a_src[src_long],
-                    cmap=DATA_CMAP, s=26, vmin=0, vmax=arclen_max,
-                    marker="^", label="long tail",
-                    edgecolors="black", linewidths=0.25)
-    ax_src.scatter(X_display[src_short, 0], X_display[src_short, 1],
-                    X_display[src_short, 2], c=a_src[src_short],
-                    cmap=DATA_CMAP, s=26, vmin=0, vmax=arclen_max,
-                    marker="s", label="short tail",
-                    edgecolors="black", linewidths=0.25)
-    ax_src.set_xlim(-XY_LIM, XY_LIM); ax_src.set_ylim(-XY_LIM, XY_LIM)
-    ax_src.set_zlim(0, 1.0)
-    _apply_3d_view(ax_src)
-    ax_src.set_title("Source (3D) — Swiss roll + Y-fork", fontsize=TITLE_SIZE)
-    ax_src.legend(loc="upper right", fontsize=8)
-
-    # Right: 2D target (spiral + Y-fork)
-    ax_tgt = fig.add_subplot(gs[0, 1])
     tgt_main = (L_tgt == 0) & (a_tgt <= fork_s + 1e-6)
     tgt_long = (L_tgt == 0) & (a_tgt > fork_s + 1e-6)
     tgt_short = (L_tgt == 1)
-    sc = ax_tgt.scatter(Y[tgt_main, 0], Y[tgt_main, 1], c=a_tgt[tgt_main],
-                         cmap=DATA_CMAP, s=14, vmin=0, vmax=arclen_max,
-                         marker="o", label="main spiral")
-    ax_tgt.scatter(Y[tgt_long, 0], Y[tgt_long, 1], c=a_tgt[tgt_long],
-                    cmap=DATA_CMAP, s=26, vmin=0, vmax=arclen_max,
-                    marker="^", label="long tail")
-    ax_tgt.scatter(Y[tgt_short, 0], Y[tgt_short, 1], c=a_tgt[tgt_short],
-                    cmap=DATA_CMAP, s=26, vmin=0, vmax=arclen_max,
-                    marker="s", label="short tail")
-    ax_tgt.set_xlim(-XY_LIM, XY_LIM); ax_tgt.set_ylim(-XY_LIM, XY_LIM)
-    ax_tgt.set_aspect("equal")
-    ax_tgt.set_xlabel("x"); ax_tgt.set_ylabel("y")
-    ax_tgt.set_title("Target (2D) — spiral + Y-fork", fontsize=TITLE_SIZE)
-    ax_tgt.legend(loc="lower left", fontsize=9)
-    plt.colorbar(sc, ax=ax_tgt, shrink=0.8, label="geodesic arclen")
 
-    # Bundled ground-truth correspondence lines: 5 anchor regions,
-    # 5 nearly-parallel lines per bundle.
     import matplotlib.colors as mcolors
     data_cmap = plt.get_cmap(DATA_CMAP)
     norm = mcolors.Normalize(vmin=0, vmax=arclen_max)
 
-    src_backbone_mask = (L_src == 0) & (a_src <= fork_s - 0.3)
-    tgt_backbone_mask = (L_tgt == 0) & (a_tgt <= fork_s - 0.3)
+    # Fork-strip overlay parameters (shared across rows)
+    base_x = float(np.cos(9.0)); base_y = float(np.sin(9.0))
+    (d1x, d1y), (d2x, d2y) = c3._asymmetric_tail_directions(9.0, np.pi / 6)
 
-    bundles = []
-    for anchor in (0.5, 2.3, 4.3):
-        si, ti = _bundle_closest(a_src, a_tgt, anchor, n=5,
-                                   src_mask=src_backbone_mask,
-                                   tgt_mask=tgt_backbone_mask)
-        bundles.append((si, ti, data_cmap(norm(anchor))))
-    # long-tail tip
-    src_long_mask = (L_src == 0) & (a_src > fork_s + 0.3)
-    tgt_long_mask = (L_tgt == 0) & (a_tgt > fork_s + 0.3)
-    si = np.where(src_long_mask)[0][np.argsort(a_src[src_long_mask])[-5:]]
-    ti = np.where(tgt_long_mask)[0][np.argsort(a_tgt[tgt_long_mask])[-5:]]
-    si = si[np.argsort(a_src[si])]
-    ti = ti[np.argsort(a_tgt[ti])]
-    bundles.append((si, ti, data_cmap(norm(float(a_src[si].mean())))))
-    # short-tail tip
-    si = np.where(L_src == 1)[0][np.argsort(a_src[L_src == 1])[-5:]]
-    ti = np.where(L_tgt == 1)[0][np.argsort(a_tgt[L_tgt == 1])[-5:]]
-    si = si[np.argsort(a_src[si])]
-    ti = ti[np.argsort(a_tgt[ti])]
-    bundles.append((si, ti, data_cmap(norm(float(a_src[si].mean())))))
+    fig = plt.figure(figsize=(13, 15))
+    gs = GridSpec(3, 2, figure=fig, wspace=0.18, hspace=0.28,
+                   left=0.05, right=0.92)
 
-    _add_bundled_lines(fig, ax_src, ax_tgt, X_display, Y, bundles)
+    regions = [
+        # (short_name, src_mask, tgt_mask, marker, size, n_anchors, n_per_bundle)
+        ("main spiral (backbone)", src_main, tgt_main, "o", 14, 5, 4),
+        ("long tail (backbone cont.)", src_long, tgt_long, "^", 22, 4, 4),
+        ("short tail (off-axis branch)", src_short, tgt_short, "s", 24, 3, 4),
+    ]
 
-    fig.suptitle("Dataset — 3D Swiss roll (source) → 2D spiral (target), both with asymmetric Y-fork",
-                 fontsize=13, y=0.98)
+    last_sc = None
+    for row, (name, sm, tm, marker, size, n_anch, n_pb) in enumerate(regions):
+        # --- 3D source panel ---------------------------------------------
+        ax_src = fig.add_subplot(gs[row, 0], projection="3d")
+        _overlay_swiss_roll_surface(ax_src, vmax=arclen_max, alpha=0.15)
+        _overlay_tail_strip(ax_src, (base_x, base_y), (d1x, d1y), length=1.2,
+                              alpha=0.15)
+        _overlay_tail_strip(ax_src, (base_x, base_y), (d2x, d2y), length=0.6,
+                              alpha=0.15)
+        # Other regions in faint grey for context
+        ax_src.scatter(
+            X_display[~sm, 0], X_display[~sm, 1], X_display[~sm, 2],
+            c="lightgray", s=5, alpha=0.22, edgecolors="none", depthshade=True,
+        )
+        # Active region in full viridis
+        ax_src.scatter(
+            X_display[sm, 0], X_display[sm, 1], X_display[sm, 2],
+            c=a_src[sm], cmap=DATA_CMAP, s=size, vmin=0, vmax=arclen_max,
+            marker=marker, edgecolors="black", linewidths=0.25,
+        )
+        ax_src.set_xlim(-XY_LIM, XY_LIM); ax_src.set_ylim(-XY_LIM, XY_LIM)
+        ax_src.set_zlim(0, 1.0)
+        _apply_3d_view(ax_src)
+        ax_src.set_title(f"Source 3D · {name}", fontsize=TITLE_SIZE)
+
+        # --- 2D target panel ---------------------------------------------
+        ax_tgt = fig.add_subplot(gs[row, 1])
+        ax_tgt.scatter(
+            Y[~tm, 0], Y[~tm, 1],
+            c="lightgray", s=5, alpha=0.3, edgecolors="none",
+        )
+        sc = ax_tgt.scatter(
+            Y[tm, 0], Y[tm, 1], c=a_tgt[tm], cmap=DATA_CMAP, s=size,
+            vmin=0, vmax=arclen_max, marker=marker,
+        )
+        last_sc = sc
+        ax_tgt.set_xlim(-XY_LIM, XY_LIM); ax_tgt.set_ylim(-XY_LIM, XY_LIM)
+        ax_tgt.set_aspect("equal")
+        ax_tgt.set_xlabel("target x")
+        ax_tgt.set_ylabel("target y")
+        ax_tgt.set_title(f"Target 2D · {name}", fontsize=TITLE_SIZE)
+
+        # --- Correspondence line bundles for this region -----------------
+        region_s_min = float(a_src[sm].min())
+        region_s_max = float(a_src[sm].max())
+        # Avoid endpoints so lines don't pile up on the boundary
+        anchors = np.linspace(region_s_min, region_s_max, n_anch + 2)[1:-1]
+        bundles = []
+        for anchor in anchors:
+            si, ti = _bundle_closest(
+                a_src, a_tgt, float(anchor), n=n_pb, src_mask=sm, tgt_mask=tm,
+            )
+            bundles.append((si, ti, data_cmap(norm(float(anchor)))))
+        _add_bundled_lines(fig, ax_src, ax_tgt, X_display, Y, bundles,
+                             alpha=0.55, linewidth=1.0)
+
+    # Single shared colorbar on the far right of the figure (own axes
+    # so it doesn't reflow the gridspec).
+    if last_sc is not None:
+        cbar_ax = fig.add_axes((0.94, 0.18, 0.014, 0.66))
+        cbar = fig.colorbar(last_sc, cax=cbar_ax, label="geodesic arclen")
+        cbar.ax.tick_params(labelsize=9)
+
+    fig.suptitle(
+        "Dataset per region — 3D Swiss roll (source) → 2D spiral (target), "
+        "N={n_src} / K={n_tgt}".format(n_src=N_SRC, n_tgt=N_TGT),
+        fontsize=13, y=0.995,
+    )
     out = FIG_DIR / "datasets.png"
     fig.savefig(out, dpi=FIG_DPI, bbox_inches="tight")
     plt.close(fig)
@@ -285,8 +295,8 @@ def make_solver_effects_figure() -> Path:
     """2 panels: pure GW vs FGW on the C3 Y-fork task (3D → 2D).
     Target 2D points coloured by argmax-matched source arclen.
     """
-    X, a_src, L_src = c3.sample_branched_swiss_roll(n=500, seed=0)
-    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=400, seed=1)
+    X, a_src, L_src = c3.sample_branched_swiss_roll(n=1400, seed=0)
+    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=1200, seed=1)
     arclen_max = float(max(a_src.max(), a_tgt.max()))
     fork_s = float(c3.spiral_arclen(9.0).item())
 
@@ -361,8 +371,8 @@ def make_solver_effects_figure() -> Path:
 # ---- Figure 3: Spearman bar comparison ----------------------------------
 
 def make_spearman_bar_figure() -> Path:
-    X, a_src, L_src = c3.sample_branched_swiss_roll(n=500, seed=0)
-    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=400, seed=1)
+    X, a_src, L_src = c3.sample_branched_swiss_roll(n=1400, seed=0)
+    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=1200, seed=1)
 
     T_pure = c3.run_torchgw_landmark(X, Y, seed=0)["T"]
     T_fgw = c3.run_torchgw_fused(X, Y, a_src, a_tgt, seed=0)["T"]
@@ -413,8 +423,8 @@ def make_spearman_bar_figure() -> Path:
 # ---- Figure 4: C3 deep-dive ---------------------------------------------
 
 def make_c3_zoom_figure() -> Path:
-    X, a_src, L_src = c3.sample_branched_swiss_roll(n=500, seed=0)
-    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=400, seed=1)
+    X, a_src, L_src = c3.sample_branched_swiss_roll(n=1400, seed=0)
+    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=1200, seed=1)
     arclen_max = float(max(a_src.max(), a_tgt.max()))
     fork_s = float(c3.spiral_arclen(9.0).item())
     T = c3.run_torchgw_fused(X, Y, a_src, a_tgt, seed=0)["T"]
