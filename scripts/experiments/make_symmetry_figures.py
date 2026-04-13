@@ -69,50 +69,123 @@ def _apply_3d_view(ax) -> None:
         pass  # older matplotlib; fall back to default cube
 
 
-def _add_correspondence_lines(
+def _overlay_swiss_roll_surface(
+    ax3d,
+    r_min: float = 0.3, r_max: float = 1.0, theta_max: float = 9.0,
+    z_max: float = 1.0, alpha: float = 0.18,
+    cmap_name: str = DATA_CMAP,
+    vmax: "float | None" = None,
+) -> None:
+    """Draw a semi-transparent shaded Swiss-roll surface underneath the
+    scatter points to give the panel a strong sense of depth.
+
+    The surface is the clean parametric swiss roll (no noise) with
+    r(θ) = r_min + (r_max - r_min)·θ/theta_max, θ ∈ [0, theta_max],
+    z ∈ [0, z_max], plotted in the (x, z, y) display order used by our
+    scatter calls. Uses matplotlib.colors.LightSource shading on the
+    θ-coloured face grid.
+    """
+    from matplotlib.colors import LightSource, Normalize
+
+    theta = np.linspace(0, theta_max, 120)
+    z = np.linspace(0, z_max, 14)
+    T, Z = np.meshgrid(theta, z)
+    R = r_min + (r_max - r_min) * T / theta_max
+    Xs = R * np.cos(T)
+    Ys = R * np.sin(T)  # spiral y
+
+    cmap = plt.get_cmap(cmap_name)
+    norm = Normalize(vmin=0, vmax=(vmax if vmax is not None else theta_max))
+    face_rgb = cmap(norm(T))[..., :3]
+    ls = LightSource(azdeg=315, altdeg=35)
+    shaded = ls.shade_rgb(face_rgb, Z, blend_mode="soft", vert_exag=0.5)
+
+    ax3d.plot_surface(
+        Xs, Z, Ys,  # display order: (x_spiral, z_param, y_spiral)
+        facecolors=shaded, alpha=alpha, antialiased=True,
+        shade=False, rstride=1, cstride=1,
+        linewidth=0, edgecolor="none",
+    )
+
+
+def _overlay_tail_strip(
+    ax3d,
+    base_xy: "tuple[float, float]", direction_xy: "tuple[float, float]",
+    length: float, z_max: float = 1.0,
+    color=(0.8, 0.8, 0.2), alpha: float = 0.18,
+) -> None:
+    """Overlay a thin rectangular strip (tail extrusion in z) as a light
+    translucent panel so straight tails on the Y-fork also get a 3D feel.
+    """
+    bx, by = base_xy
+    dx, dy = direction_xy
+    s = np.linspace(0, length, 10)
+    z = np.linspace(0, z_max, 6)
+    S, Z = np.meshgrid(s, z)
+    Xs = bx + S * dx
+    Ys = by + S * dy
+    facecolor = np.broadcast_to(np.asarray(color, dtype=float), (*Xs.shape, 3))
+    ax3d.plot_surface(
+        Xs, Z, Ys, facecolors=facecolor, alpha=alpha, antialiased=True,
+        shade=False, rstride=1, cstride=1, linewidth=0, edgecolor="none",
+    )
+
+
+def _add_bundled_lines(
     fig, ax2d, ax3d,
     src_xy: np.ndarray, tgt_xyz_display: np.ndarray,
-    src_s: np.ndarray, tgt_s: np.ndarray,
-    n_lines: int = 12, cmap_name: str = DATA_CMAP,
-    alpha: float = 0.6, linewidth: float = 1.2,
+    bundles: "list[tuple[np.ndarray, np.ndarray, object]]",
+    alpha: float = 0.55, linewidth: float = 1.1,
 ) -> None:
-    """Draw `n_lines` across-panel lines connecting source points and their
-    parameter-matched target points. Coloured by the shared parameter.
+    """Draw bundles of connecting lines between matching source/target points.
 
-    tgt_xyz_display must already be in the (x, y, z) order used by the 3D
-    scatter call (i.e. for a swiss roll plotted as scatter(Y[:,0], Y[:,2],
-    Y[:,1]), pass np.stack((Y[:,0], Y[:,2], Y[:,1]), axis=1)).
+    Each `bundle` is `(src_indices, tgt_indices, colour)`. The two index
+    arrays must have the same length; lines connect them pairwise in the
+    given order (caller should usually sort both by a shared parameter so
+    lines in a bundle are nearly parallel).
+
+    tgt_xyz_display must be in the (x, y, z) order already used by the 3D
+    scatter call.
     """
     from matplotlib.patches import ConnectionPatch
     from mpl_toolkits.mplot3d import proj3d
-    import matplotlib.colors as mcolors
 
-    # Force the 3D projection matrix to be current so proj_transform is valid.
-    fig.canvas.draw()
+    fig.canvas.draw()  # finalise 3D projection matrix
 
-    s_min = float(min(src_s.min(), tgt_s.min()))
-    s_max = float(max(src_s.max(), tgt_s.max()))
-    # Anchor values evenly spanning the parameter range, avoiding the very ends
-    anchors = np.linspace(s_min, s_max, n_lines + 2)[1:-1]
-    cmap = plt.get_cmap(cmap_name)
-    norm = mcolors.Normalize(vmin=s_min, vmax=s_max)
+    for src_idx, tgt_idx, color in bundles:
+        for i, j in zip(src_idx, tgt_idx):
+            x2, y2 = float(src_xy[int(i), 0]), float(src_xy[int(i), 1])
+            xyz = tgt_xyz_display[int(j)]
+            x3p, y3p, _ = proj3d.proj_transform(
+                float(xyz[0]), float(xyz[1]), float(xyz[2]), ax3d.get_proj(),
+            )
+            con = ConnectionPatch(
+                xyA=(x2, y2), coordsA=ax2d.transData,
+                xyB=(x3p, y3p), coordsB=ax3d.transData,
+                color=color, alpha=alpha, linewidth=linewidth,
+                zorder=5,
+            )
+            con.set_clip_on(False)
+            fig.add_artist(con)
 
-    for s in anchors:
-        i = int(np.argmin(np.abs(src_s - s)))
-        j = int(np.argmin(np.abs(tgt_s - s)))
-        x2, y2 = float(src_xy[i, 0]), float(src_xy[i, 1])
-        xyz = tgt_xyz_display[j]
-        x3p, y3p, _ = proj3d.proj_transform(
-            float(xyz[0]), float(xyz[1]), float(xyz[2]), ax3d.get_proj(),
-        )
-        con = ConnectionPatch(
-            xyA=(x2, y2), coordsA=ax2d.transData,
-            xyB=(x3p, y3p), coordsB=ax3d.transData,
-            color=cmap(norm(s)), alpha=alpha, linewidth=linewidth,
-            zorder=5,
-        )
-        con.set_clip_on(False)  # allow line to cross axes boundaries
-        fig.add_artist(con)
+
+def _bundle_by_anchor(
+    src_s: np.ndarray, tgt_s: np.ndarray,
+    anchor_value: float, n_per_bundle: int,
+    src_mask: "np.ndarray | None" = None,
+    tgt_mask: "np.ndarray | None" = None,
+) -> "tuple[np.ndarray, np.ndarray]":
+    """Pick the n_per_bundle source and target points whose scalar is closest
+    to `anchor_value`. Returns (src_indices, tgt_indices) sorted by their own
+    scalar so pair-wise connections form nearly-parallel lines.
+    """
+    s_range_src = np.where(src_mask, src_s, np.inf) if src_mask is not None else src_s
+    s_range_tgt = np.where(tgt_mask, tgt_s, np.inf) if tgt_mask is not None else tgt_s
+    src_idx = np.argsort(np.abs(s_range_src - anchor_value))[:n_per_bundle]
+    tgt_idx = np.argsort(np.abs(s_range_tgt - anchor_value))[:n_per_bundle]
+    src_idx = src_idx[np.argsort(src_s[src_idx])]
+    tgt_idx = tgt_idx[np.argsort(tgt_s[tgt_idx])]
+    return src_idx, tgt_idx
 
 
 def _get_rho(x: np.ndarray, y: np.ndarray) -> float:
@@ -158,9 +231,11 @@ def make_datasets_figure() -> Path:
     # (0, 1) C1 / C2 target — 3D Swiss roll
     ax_c12_tgt = fig.add_subplot(gs[0, 1], projection="3d")
     Y1_display = np.stack((Y1[:, 0], Y1[:, 2], Y1[:, 1]), axis=1)
+    _overlay_swiss_roll_surface(ax_c12_tgt, vmax=9)
     sc = ax_c12_tgt.scatter(Y1_display[:, 0], Y1_display[:, 1],
-                              Y1_display[:, 2], c=b1, cmap=DATA_CMAP, s=12,
-                              vmin=0, vmax=9)
+                              Y1_display[:, 2], c=b1, cmap=DATA_CMAP, s=14,
+                              vmin=0, vmax=9, edgecolors="black",
+                              linewidths=0.25, depthshade=True)
     ax_c12_tgt.set_title("C1 / C2 target — simple Swiss roll (3D)",
                           fontsize=TITLE_SIZE)
     ax_c12_tgt.set_xlim(-XY_LIM, XY_LIM); ax_c12_tgt.set_ylim(-XY_LIM, XY_LIM)
@@ -197,21 +272,32 @@ def make_datasets_figure() -> Path:
     ax_c3_src.set_aspect("equal")
     ax_c3_src.legend(loc="lower left", fontsize=9)
 
-    # (1, 1) C3 target — 3D Y-fork Swiss roll
+    # (1, 1) C3 target — 3D Y-fork Swiss roll, with shaded backdrop surfaces
     ax_c3_tgt = fig.add_subplot(gs[1, 1], projection="3d")
     Y3_display = np.stack((Y3[:, 0], Y3[:, 2], Y3[:, 1]), axis=1)
+    _overlay_swiss_roll_surface(ax_c3_tgt, vmax=arclen_max)
+    # Fork-base position + long/short tail directions, mirroring run_c3
+    base_x = float(np.cos(9.0)); base_y = float(np.sin(9.0))
+    (d1x, d1y), (d2x, d2y) = c3._asymmetric_tail_directions(9.0, np.pi / 6)
+    _overlay_tail_strip(ax_c3_tgt, (base_x, base_y), (d1x, d1y),
+                         length=1.2, color=(0.85, 0.9, 0.35))
+    _overlay_tail_strip(ax_c3_tgt, (base_x, base_y), (d2x, d2y),
+                         length=0.6, color=(0.95, 0.95, 0.25))
     sc = ax_c3_tgt.scatter(Y3_display[tgt_main, 0], Y3_display[tgt_main, 1],
                              Y3_display[tgt_main, 2], c=b3[tgt_main],
-                             cmap=DATA_CMAP, s=12, vmin=0, vmax=arclen_max,
-                             marker="o", label="main spiral")
+                             cmap=DATA_CMAP, s=14, vmin=0, vmax=arclen_max,
+                             marker="o", label="main spiral",
+                             edgecolors="black", linewidths=0.25)
     ax_c3_tgt.scatter(Y3_display[tgt_long, 0], Y3_display[tgt_long, 1],
                        Y3_display[tgt_long, 2], c=b3[tgt_long],
-                       cmap=DATA_CMAP, s=22, vmin=0, vmax=arclen_max,
-                       marker="^", label="long tail")
+                       cmap=DATA_CMAP, s=26, vmin=0, vmax=arclen_max,
+                       marker="^", label="long tail",
+                       edgecolors="black", linewidths=0.25)
     ax_c3_tgt.scatter(Y3_display[tgt_short, 0], Y3_display[tgt_short, 1],
                        Y3_display[tgt_short, 2], c=b3[tgt_short],
-                       cmap=DATA_CMAP, s=22, vmin=0, vmax=arclen_max,
-                       marker="s", label="short tail")
+                       cmap=DATA_CMAP, s=26, vmin=0, vmax=arclen_max,
+                       marker="s", label="short tail",
+                       edgecolors="black", linewidths=0.25)
     ax_c3_tgt.set_title("C3 target — Swiss roll + Y-fork (3D)",
                          fontsize=TITLE_SIZE)
     ax_c3_tgt.set_xlim(-XY_LIM, XY_LIM); ax_c3_tgt.set_ylim(-XY_LIM, XY_LIM)
@@ -221,11 +307,52 @@ def make_datasets_figure() -> Path:
     plt.colorbar(sc, ax=ax_c3_tgt, shrink=0.7, label="geodesic arclen",
                   pad=0.08)
 
-    # Ground-truth correspondence lines (same parameter → matching target).
-    _add_correspondence_lines(fig, ax_c12_src, ax_c12_tgt,
-                                X1, Y1_display, a1, b1, n_lines=12)
-    _add_correspondence_lines(fig, ax_c3_src, ax_c3_tgt,
-                                X3, Y3_display, a3, b3, n_lines=12)
+    # Bundled ground-truth correspondence lines: 5 anchor regions per track,
+    # 5 nearly-parallel lines per bundle. Each bundle's colour comes from the
+    # dataset cmap evaluated at the anchor's scalar value, so a reader can
+    # read "this cluster at θ=5 corresponds to that cluster at θ=5".
+    import matplotlib.colors as _mc
+    data_cmap = plt.get_cmap(DATA_CMAP)
+    n_pb = 5  # points per bundle
+
+    # --- C1 / C2: 5 anchors across θ ∈ [0, 9]
+    bundles_c12 = []
+    c12_norm = _mc.Normalize(vmin=0, vmax=9)
+    for anchor in (0.6, 2.4, 4.5, 6.5, 8.3):
+        s_idx, t_idx = _bundle_by_anchor(a1, b1, anchor, n_pb)
+        bundles_c12.append((s_idx, t_idx, data_cmap(c12_norm(anchor))))
+    _add_bundled_lines(fig, ax_c12_src, ax_c12_tgt, X1, Y1_display, bundles_c12)
+
+    # --- C3: 3 anchors along backbone (main spiral region) + long-tail tip +
+    # short-tail tip. Mask by label + arclen so we pick points from the right
+    # region when multiple share arclen (e.g. fork base).
+    bundles_c3 = []
+    c3_norm = _mc.Normalize(vmin=0, vmax=arclen_max)
+    # Backbone anchors (main spiral only; exclude fork-base overlap)
+    src_backbone = (L3 == 0) & (a3 <= fork_s - 0.3)
+    tgt_backbone = (L3t == 0) & (b3 <= fork_s - 0.3)
+    for anchor in (0.5, 2.3, 4.3):
+        s_idx, t_idx = _bundle_by_anchor(a3, b3, anchor, n_pb,
+                                           src_backbone, tgt_backbone)
+        bundles_c3.append((s_idx, t_idx, data_cmap(c3_norm(anchor))))
+    # Long-tail tip (label 0, largest arclen)
+    src_long = (L3 == 0) & (a3 > fork_s + 0.3)
+    tgt_long = (L3t == 0) & (b3 > fork_s + 0.3)
+    s_idx = np.where(src_long)[0][np.argsort(a3[src_long])[-n_pb:]]
+    t_idx = np.where(tgt_long)[0][np.argsort(b3[tgt_long])[-n_pb:]]
+    s_idx = s_idx[np.argsort(a3[s_idx])]
+    t_idx = t_idx[np.argsort(b3[t_idx])]
+    bundles_c3.append((s_idx, t_idx, data_cmap(c3_norm(float(a3[s_idx].mean())))))
+    # Short-tail tip (label 1, largest arclen)
+    src_short = (L3 == 1)
+    tgt_short = (L3t == 1)
+    s_idx = np.where(src_short)[0][np.argsort(a3[src_short])[-n_pb:]]
+    t_idx = np.where(tgt_short)[0][np.argsort(b3[tgt_short])[-n_pb:]]
+    s_idx = s_idx[np.argsort(a3[s_idx])]
+    t_idx = t_idx[np.argsort(b3[t_idx])]
+    bundles_c3.append((s_idx, t_idx, data_cmap(c3_norm(float(a3[s_idx].mean())))))
+
+    _add_bundled_lines(fig, ax_c3_src, ax_c3_tgt, X3, Y3_display, bundles_c3)
 
     fig.suptitle("Datasets — each point coloured by its natural 1D parameter "
                   "(θ for the simple spiral, geodesic arclen for the Y-fork)",
@@ -433,12 +560,23 @@ def make_c3_zoom_figure() -> Path:
     ax.legend(loc="lower left", fontsize=9)
 
     ax = fig.add_subplot(1, 4, 2, projection="3d")
+    arclen_max_local = float(b.max())
+    _overlay_swiss_roll_surface(ax, vmax=arclen_max_local, alpha=0.18)
+    base_x = float(np.cos(9.0)); base_y = float(np.sin(9.0))
+    (d1x, d1y), (d2x, d2y) = c3._asymmetric_tail_directions(9.0, np.pi / 6)
+    _overlay_tail_strip(ax, (base_x, base_y), (d1x, d1y),
+                          length=1.2, color=(0.85, 0.9, 0.35))
+    _overlay_tail_strip(ax, (base_x, base_y), (d2x, d2y),
+                          length=0.6, color=(0.95, 0.95, 0.25))
     ax.scatter(Y[main_arc_t, 0], Y[main_arc_t, 2], Y[main_arc_t, 1],
-               c="steelblue", s=10, label="main spiral")
+               c="steelblue", s=12, label="main spiral",
+               edgecolors="black", linewidths=0.25)
     ax.scatter(Y[long_t_tgt, 0], Y[long_t_tgt, 2], Y[long_t_tgt, 1],
-               c="mediumseagreen", s=14, marker="^", label="long tail")
+               c="mediumseagreen", s=18, marker="^", label="long tail",
+               edgecolors="black", linewidths=0.25)
     ax.scatter(Y[short_t_tgt, 0], Y[short_t_tgt, 2], Y[short_t_tgt, 1],
-               c="crimson", s=14, marker="s", label="short tail")
+               c="crimson", s=18, marker="s", label="short tail",
+               edgecolors="black", linewidths=0.25)
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_zlim(0, 1.0)
     ax.set_title("C3 target (3D)")
