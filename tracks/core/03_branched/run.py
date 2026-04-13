@@ -386,6 +386,14 @@ def run_torchgw_landmark(
 
 # ---- FGW solver using geodesic-distance feature -------------------------
 
+def pot_too_large(n_source: int, n_target: int, threshold: int = 5_000) -> bool:
+    """POT's entropic FGW builds dense O(N^2)/O(K^2) cost matrices. Above
+    max(N, K) = 5000 the wall time and memory blow up; main() emits a
+    status='skip' record instead of attempting the run.
+    """
+    return max(n_source, n_target) > threshold
+
+
 def _build_feature_cost(
     src_arclens: np.ndarray, tgt_arclens: np.ndarray,
 ) -> np.ndarray:
@@ -478,6 +486,81 @@ def run_torchgw_fused(
     }
 
 
+def run_pot_fused(
+    X: np.ndarray,
+    Y: np.ndarray,
+    src_arclens: np.ndarray,
+    tgt_arclens: np.ndarray,
+    seed: int = 0,
+    epsilon: float = 5e-3,
+    max_iter: int = 500,
+    alpha: float = 0.5,
+) -> dict:
+    """POT entropic_fused_gromov_wasserstein on CPU with arclen feature.
+
+    Apples-to-apples baseline against torchgw-fused. Returns the same dict
+    shape (T, gw_cost, marginal_error, wall_s, gpu_peak_gb=None,
+    iterations, hyperparams, solver_version).
+    """
+    from typing import Any
+    import ot
+    import ot.gromov as otgw
+
+    C1 = np.asarray(ot.dist(X, X, metric="sqeuclidean"), dtype=np.float64)
+    C2 = np.asarray(ot.dist(Y, Y, metric="sqeuclidean"), dtype=np.float64)
+    C1 /= (C1.max() + 1e-12)
+    C2 /= (C2.max() + 1e-12)
+
+    M_feat = _build_feature_cost(src_arclens, tgt_arclens)
+
+    p = np.full(X.shape[0], 1.0 / X.shape[0], dtype=np.float64)
+    q = np.full(Y.shape[0], 1.0 / Y.shape[0], dtype=np.float64)
+
+    np.random.seed(seed)
+
+    t0 = time.perf_counter()
+    T_and_log = otgw.entropic_fused_gromov_wasserstein(
+        M_feat, C1, C2, p, q,
+        loss_fun="square_loss",
+        epsilon=epsilon,
+        alpha=alpha,
+        max_iter=max_iter,
+        tol=1e-9,
+        log=True,
+        verbose=False,
+    )
+    pot_log: dict[str, Any] = {}
+    if isinstance(T_and_log, tuple):
+        T, _raw_log = T_and_log
+        if isinstance(_raw_log, dict):
+            pot_log = _raw_log
+    else:
+        T = T_and_log
+    wall_s = time.perf_counter() - t0
+
+    T_np = np.asarray(T, dtype=np.float64)
+    marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - p)))
+    gw_cost = float(pot_log.get("fgw_dist", pot_log.get("gw_dist", float("nan"))))
+    err_list: list = pot_log.get("err") or []
+    iterations = len(err_list) if err_list else -1
+
+    return {
+        "T": T_np,
+        "gw_cost": gw_cost,
+        "marginal_error": marginal_error,
+        "wall_s": wall_s,
+        "gpu_peak_gb": None,
+        "iterations": iterations,
+        "hyperparams": {
+            "epsilon": epsilon,
+            "max_iter": max_iter,
+            "alpha": alpha,
+            "loss_fun": "square_loss",
+        },
+        "solver_version": f"pot=={getattr(ot, '__version__', 'unknown')}",
+    }
+
+
 # ---- main ---------------------------------------------------------------
 
 def main() -> None:
@@ -487,7 +570,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description="C3 Branched track: branched spiral → branched swiss roll")
     ap.add_argument("--solver", required=True,
-                    choices=["torchgw-landmark", "torchgw-fused"])
+                    choices=["torchgw-landmark", "torchgw-fused", "pot-fused"])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--subset", default="full", choices=["small", "full"])
@@ -529,6 +612,17 @@ def main() -> None:
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # POT memory guard for pot-fused — same threshold as C1
+    if args.solver == "pot-fused" and pot_too_large(args.n_source, args.n_target):
+        rec["status"] = "skip"
+        rec["error"] = (
+            f"skipped: POT O(N^2) memory guard "
+            f"(max(N,K)={max(args.n_source, args.n_target)} > 5000)"
+        )
+        out_path.write_text(json.dumps(rec, indent=2))
+        print(f"[C3] skipped (POT memory guard) → {out_path}")
+        return
+
     try:
         # Source is the 3D Swiss roll with Y-fork; target is the 2D spiral
         # with Y-fork. Flipping the dim direction (dimensionality reduction
@@ -551,6 +645,8 @@ def main() -> None:
             result = run_torchgw_landmark(X, Y, seed=args.seed)
         elif args.solver == "torchgw-fused":
             result = run_torchgw_fused(X, Y, src_arclens, tgt_arclens, seed=args.seed)
+        elif args.solver == "pot-fused":
+            result = run_pot_fused(X, Y, src_arclens, tgt_arclens, seed=args.seed)
         else:
             raise ValueError(f"unknown solver: {args.solver}")
 

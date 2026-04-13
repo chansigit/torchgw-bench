@@ -185,3 +185,24 @@ def test_run_torchgw_fused_returns_expected_fields():
     }
     assert out["T"].shape == (60, 80)
     assert out["hyperparams"]["fgw_alpha"] == 0.5
+
+
+def test_run_pot_fused_returns_expected_fields():
+    X, src_arclens, _ = run.sample_branched_swiss_roll(n=60, seed=0)
+    Y, tgt_arclens, _ = run.sample_branched_spiral(n=80, seed=1)
+    out = run.run_pot_fused(
+        X, Y, src_arclens, tgt_arclens, seed=0, max_iter=80, alpha=0.5,
+    )
+    assert set(out.keys()) >= {
+        "T", "gw_cost", "marginal_error", "wall_s",
+        "gpu_peak_gb", "iterations", "hyperparams", "solver_version",
+    }
+    assert out["T"].shape == (60, 80)
+    assert out["gpu_peak_gb"] is None  # POT runs on CPU
+    assert out["hyperparams"]["alpha"] == 0.5
+
+
+def test_pot_too_large_threshold():
+    assert run.pot_too_large(6000, 7000) is True
+    assert run.pot_too_large(400, 500) is False
+    assert run.pot_too_large(5000, 5000) is False  # threshold is strict-greater
