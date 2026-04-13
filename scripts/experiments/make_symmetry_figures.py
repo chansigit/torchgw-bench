@@ -72,7 +72,7 @@ def _apply_3d_view(ax) -> None:
 def _overlay_swiss_roll_surface(
     ax3d,
     r_min: float = 0.3, r_max: float = 1.0, theta_max: float = 9.0,
-    z_max: float = 1.0, alpha: float = 0.18,
+    z_max: float = 1.0, alpha: float = 0.35,
     cmap_name: str = DATA_CMAP,
     vmax: "float | None" = None,
 ) -> None:
@@ -100,8 +100,12 @@ def _overlay_swiss_roll_surface(
     ls = LightSource(azdeg=315, altdeg=35)
     shaded = ls.shade_rgb(face_rgb, Z, blend_mode="soft", vert_exag=0.5)
 
+    # Match the scatter call's coordinate order: scatter uses
+    # (Y[:,0], Y[:,2], Y[:,1]) = (spiral_x, spiral_y, uniform_height),
+    # so plot_surface must receive (X_axis, Y_axis, Z_axis) =
+    # (spiral_x, spiral_y, height).
     ax3d.plot_surface(
-        Xs, Z, Ys,  # display order: (x_spiral, z_param, y_spiral)
+        Xs, Ys, Z,
         facecolors=shaded, alpha=alpha, antialiased=True,
         shade=False, rstride=1, cstride=1,
         linewidth=0, edgecolor="none",
@@ -112,7 +116,7 @@ def _overlay_tail_strip(
     ax3d,
     base_xy: "tuple[float, float]", direction_xy: "tuple[float, float]",
     length: float, z_max: float = 1.0,
-    color=(0.8, 0.8, 0.2), alpha: float = 0.18,
+    color=(0.8, 0.8, 0.2), alpha: float = 0.35,
 ) -> None:
     """Overlay a thin rectangular strip (tail extrusion in z) as a light
     translucent panel so straight tails on the Y-fork also get a 3D feel.
@@ -125,8 +129,9 @@ def _overlay_tail_strip(
     Xs = bx + S * dx
     Ys = by + S * dy
     facecolor = np.broadcast_to(np.asarray(color, dtype=float), (*Xs.shape, 3))
+    # Same (spiral_x, spiral_y, height) axis order as the scatter calls.
     ax3d.plot_surface(
-        Xs, Z, Ys, facecolors=facecolor, alpha=alpha, antialiased=True,
+        Xs, Ys, Z, facecolors=facecolor, alpha=alpha, antialiased=True,
         shade=False, rstride=1, cstride=1, linewidth=0, edgecolor="none",
     )
 
