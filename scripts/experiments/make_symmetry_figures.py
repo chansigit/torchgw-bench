@@ -52,9 +52,21 @@ MATCH_CMAP = "plasma"  # solver-effect panels — depicts the matched scalar
 XY_LIM = 1.8           # 2D axis limit; covers both simple spiral and Y-fork
 TITLE_SIZE = 12
 FIG_DPI = 130
-# 3D view: near-top-down so the spiral / Y-fork structure is legible.
-# (Old elev=20 made the swiss roll look like a tall wall of points.)
-VIEW_3D = dict(elev=80, azim=-60)
+# 3D view: a 3/4 perspective that shows the spiral pattern AND the
+# vertical extrusion. Swiss roll spans ~3 units in xy but only 1 in z,
+# so the default cube aspect compresses the spiral; we stretch the z
+# axis with set_box_aspect (see _apply_3d_view) and keep elev modest.
+VIEW_3D = dict(elev=30, azim=-60)
+BOX_ASPECT_3D = (1.6, 1.6, 1.0)
+
+
+def _apply_3d_view(ax) -> None:
+    """Set the standard 3D camera and box aspect for swiss-roll panels."""
+    ax.view_init(elev=VIEW_3D["elev"], azim=VIEW_3D["azim"])
+    try:
+        ax.set_box_aspect(BOX_ASPECT_3D)
+    except (AttributeError, NotImplementedError):
+        pass  # older matplotlib; fall back to default cube
 
 
 def _get_rho(x: np.ndarray, y: np.ndarray) -> float:
@@ -103,7 +115,7 @@ def make_datasets_figure() -> Path:
                   fontsize=TITLE_SIZE)
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_zlim(0, 1.0)  # z is uniform in [0, 1]
-    ax.view_init(**VIEW_3D)
+    _apply_3d_view(ax)
     plt.colorbar(sc, ax=ax, shrink=0.7, label="θ (rad)", pad=0.08)
 
     # Backbone-vs-tail masks (label 0 = main + long tail, label 1 = short tail).
@@ -150,7 +162,7 @@ def make_datasets_figure() -> Path:
     ax.set_title("C3 target — Swiss roll + Y-fork (3D)", fontsize=TITLE_SIZE)
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_zlim(0, 1.0)
-    ax.view_init(**VIEW_3D)
+    _apply_3d_view(ax)
     ax.legend(loc="upper right", fontsize=8)
     plt.colorbar(sc, ax=ax, shrink=0.7, label="geodesic arclen", pad=0.08)
 
@@ -369,7 +381,7 @@ def make_c3_zoom_figure() -> Path:
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_zlim(0, 1.0)
     ax.set_title("C3 target (3D)")
-    ax.view_init(**VIEW_3D)
+    _apply_3d_view(ax)
     ax.legend(loc="upper right", fontsize=8)
 
     ax = fig.add_subplot(1, 4, 3)
