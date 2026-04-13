@@ -174,15 +174,15 @@ def _bundle_closest(
 # ---- Figure 1: dataset showcase (3D source → 2D target) -----------------
 
 def make_datasets_figure() -> Path:
-    """One panel-pair per cluster of 10 source points and their 10 matched
-    target points. Five clusters total: three on the spiral backbone, one on
-    the long tail, one on the short tail.
+    """2x3 cluster grid. Top-left cell is empty (reserved for a schematic).
+    Top row right two cells: long tail / short tail clusters.
+    Bottom row: three spiral clusters (inner, middle, outer).
 
-    Every panel shows the *full* point cloud as small faint dots so the
-    reader sees the whole manifold; the active 10 points are highlighted
-    with the region's marker (○ / ▲ / ■), full viridis colour, and a
-    black edge. Lines link the 10 source points to their 10 matched
-    target points.
+    Each non-empty cell is a tight pair of (3D source, 2D target). Every
+    panel shows the *full* arclen-coloured cloud as small semi-transparent
+    dots; the 10-point cluster pops with the region's marker (○ / ▲ / ■),
+    a black edge, and full viridis colour. Lines link the 10 source points
+    to their 10 parameter-matched target points.
     """
     N_SRC, N_TGT = 4000, 5000
     X, a_src, L_src = c3.sample_branched_swiss_roll(n=N_SRC, seed=0)
@@ -191,7 +191,6 @@ def make_datasets_figure() -> Path:
     fork_s = float(c3.spiral_arclen(9.0).item())
     X_display = np.stack((X[:, 0], X[:, 2], X[:, 1]), axis=1)
 
-    # Region masks
     src_main = (L_src == 0) & (a_src <= fork_s + 1e-6)
     src_long = (L_src == 0) & (a_src > fork_s + 1e-6)
     src_short = (L_src == 1)
@@ -206,23 +205,29 @@ def make_datasets_figure() -> Path:
     base_x = float(np.cos(9.0)); base_y = float(np.sin(9.0))
     (d1x, d1y), (d2x, d2y) = c3._asymmetric_tail_directions(9.0, np.pi / 6)
 
-    # Five clusters: (anchor_arclen, src_mask, tgt_mask, marker, label)
-    clusters = [
-        (0.6,            src_main,  tgt_main,  "o", "spiral inner (arclen ≈ 0.6)"),
-        (2.5,            src_main,  tgt_main,  "o", "spiral middle (arclen ≈ 2.5)"),
-        (4.5,            src_main,  tgt_main,  "o", "spiral outer (arclen ≈ 4.5)"),
-        (fork_s + 0.6,   src_long,  tgt_long,  "^", "long tail (arclen ≈ fork+0.6)"),
-        (fork_s + 0.3,   src_short, tgt_short, "s", "short tail (arclen ≈ fork+0.3)"),
+    # 2x3 layout. Cell (0, 0) intentionally left empty.
+    clusters_layout = [
+        # (gs_row, gs_col, anchor, src_mask, tgt_mask, marker, label)
+        (0, 1, fork_s + 0.6, src_long,  tgt_long,  "^", "long tail (≈ fork + 0.6)"),
+        (0, 2, fork_s + 0.3, src_short, tgt_short, "s", "short tail (≈ fork + 0.3)"),
+        (1, 0, 0.6,           src_main, tgt_main,  "o", "spiral inner (≈ 0.6)"),
+        (1, 1, 2.5,           src_main, tgt_main,  "o", "spiral middle (≈ 2.5)"),
+        (1, 2, 4.5,           src_main, tgt_main,  "o", "spiral outer (≈ 4.5)"),
     ]
     n_per_cluster = 10
 
-    fig = plt.figure(figsize=(13, 24))
-    gs = GridSpec(5, 2, figure=fig, wspace=0.18, hspace=0.30,
-                   left=0.05, right=0.92)
+    fig = plt.figure(figsize=(19, 11))
+    outer_gs = GridSpec(2, 3, figure=fig, wspace=0.13, hspace=0.18,
+                         left=0.03, right=0.93, top=0.92, bottom=0.05)
 
     last_sc = None
-    for row, (anchor, sm, tm, marker, label) in enumerate(clusters):
-        # Pick the n closest source points and n closest target points to anchor
+    for (gs_row, gs_col, anchor, sm, tm, marker, label) in clusters_layout:
+        # Each cell is itself a tight 1x2 (3D source, 2D target) sub-grid
+        cell_gs = outer_gs[gs_row, gs_col].subgridspec(1, 2, wspace=0.03)
+        ax_src = fig.add_subplot(cell_gs[0, 0], projection="3d")
+        ax_tgt = fig.add_subplot(cell_gs[0, 1])
+
+        # Pick the 10 source / 10 target points closest to the anchor
         src_dist = np.where(sm, np.abs(a_src - anchor), np.inf)
         tgt_dist = np.where(tm, np.abs(a_tgt - anchor), np.inf)
         src_idx = np.argsort(src_dist)[:n_per_cluster]
@@ -230,66 +235,75 @@ def make_datasets_figure() -> Path:
         src_idx = src_idx[np.argsort(a_src[src_idx])]
         tgt_idx = tgt_idx[np.argsort(a_tgt[tgt_idx])]
 
-        src_active = np.zeros(N_SRC, dtype=bool); src_active[src_idx] = True
-        tgt_active = np.zeros(N_TGT, dtype=bool); tgt_active[tgt_idx] = True
-
         # --- 3D source panel ---------------------------------------------
-        ax_src = fig.add_subplot(gs[row, 0], projection="3d")
-        _overlay_swiss_roll_surface(ax_src, vmax=arclen_max, alpha=SURFACE_ALPHA)
+        _overlay_swiss_roll_surface(ax_src, vmax=arclen_max, alpha=0.16)
         _overlay_tail_strip(ax_src, (base_x, base_y), (d1x, d1y), length=1.2,
-                              alpha=TAIL_STRIP_ALPHA)
+                              alpha=0.18)
         _overlay_tail_strip(ax_src, (base_x, base_y), (d2x, d2y), length=0.6,
-                              alpha=TAIL_STRIP_ALPHA)
-        # All non-active points as small faint plain dots
+                              alpha=0.18)
+        # All points coloured by arclen, small + semi-transparent
         ax_src.scatter(
-            X_display[~src_active, 0], X_display[~src_active, 1],
-            X_display[~src_active, 2],
-            c="lightgray", s=1.5, alpha=0.20, edgecolors="none", depthshade=True,
+            X_display[:, 0], X_display[:, 1], X_display[:, 2],
+            c=a_src, cmap=DATA_CMAP, s=2.0, alpha=0.18,
+            vmin=0, vmax=arclen_max, edgecolors="none", depthshade=True,
         )
-        # Highlighted cluster: arclen-coloured, region marker, black edge
+        # Highlighted cluster: region marker, full colour, black edge
         ax_src.scatter(
             X_display[src_idx, 0], X_display[src_idx, 1], X_display[src_idx, 2],
             c=a_src[src_idx], cmap=DATA_CMAP, s=70, vmin=0, vmax=arclen_max,
-            marker=marker, edgecolors="black", linewidths=0.8,
+            marker=marker, edgecolors="black", linewidths=0.7,
         )
         ax_src.set_xlim(-XY_LIM, XY_LIM); ax_src.set_ylim(-XY_LIM, XY_LIM)
         ax_src.set_zlim(0, 1.0)
+        ax_src.set_xticks([-1, 0, 1])
+        ax_src.set_yticks([-1, 0, 1])
+        ax_src.set_zticks([0, 1])
+        ax_src.tick_params(labelsize=7)
         _apply_3d_view(ax_src)
-        ax_src.set_title(f"Source 3D · {label}", fontsize=TITLE_SIZE)
 
         # --- 2D target panel ---------------------------------------------
-        ax_tgt = fig.add_subplot(gs[row, 1])
         ax_tgt.scatter(
-            Y[~tgt_active, 0], Y[~tgt_active, 1],
-            c="lightgray", s=1.5, alpha=0.25, edgecolors="none",
+            Y[:, 0], Y[:, 1],
+            c=a_tgt, cmap=DATA_CMAP, s=2.0, alpha=0.20,
+            vmin=0, vmax=arclen_max, edgecolors="none",
         )
         sc = ax_tgt.scatter(
             Y[tgt_idx, 0], Y[tgt_idx, 1], c=a_tgt[tgt_idx], cmap=DATA_CMAP,
             s=70, vmin=0, vmax=arclen_max, marker=marker,
-            edgecolors="black", linewidths=0.8,
+            edgecolors="black", linewidths=0.7,
         )
         last_sc = sc
         ax_tgt.set_xlim(-XY_LIM, XY_LIM); ax_tgt.set_ylim(-XY_LIM, XY_LIM)
         ax_tgt.set_aspect("equal")
-        ax_tgt.set_xlabel("target x"); ax_tgt.set_ylabel("target y")
-        ax_tgt.set_title(f"Target 2D · {label}", fontsize=TITLE_SIZE)
+        ax_tgt.set_xticks([-1, 0, 1])
+        ax_tgt.set_yticks([-1, 0, 1])
+        ax_tgt.set_xlabel(""); ax_tgt.set_ylabel("")
+        ax_tgt.tick_params(labelsize=8)
 
-        # --- Correspondence lines (10 lines, one per src/tgt pair) -------
+        # Cluster label centred above the (source, target) pair
+        bbox_src = ax_src.get_position()
+        bbox_tgt = ax_tgt.get_position()
+        cx = (bbox_src.x0 + bbox_tgt.x1) / 2
+        cy = max(bbox_src.y1, bbox_tgt.y1) + 0.005
+        fig.text(cx, cy, label, ha="center", va="bottom",
+                  fontsize=11, fontweight="bold")
+
+        # 10 connection lines, all coloured by the cluster's anchor arclen
         bundle_color = data_cmap(norm(float(anchor)))
         bundles = [(src_idx, tgt_idx, bundle_color)]
         _add_bundled_lines(fig, ax_src, ax_tgt, X_display, Y, bundles,
-                             alpha=0.65, linewidth=1.2)
+                             alpha=0.7, linewidth=1.1)
 
-    # Shared colorbar pinned to the figure's right gutter
+    # Shared colorbar on the right
     if last_sc is not None:
-        cbar_ax = fig.add_axes((0.94, 0.18, 0.014, 0.66))
+        cbar_ax = fig.add_axes((0.945, 0.10, 0.012, 0.78))
         cbar = fig.colorbar(last_sc, cax=cbar_ax, label="geodesic arclen")
         cbar.ax.tick_params(labelsize=9)
 
     fig.suptitle(
         f"Five source clusters → matched target clusters · "
         f"3D Swiss roll N={N_SRC} → 2D spiral K={N_TGT}",
-        fontsize=13, y=0.995,
+        fontsize=13, y=0.97,
     )
     out = FIG_DIR / "datasets.png"
     fig.savefig(out, dpi=FIG_DPI, bbox_inches="tight")
