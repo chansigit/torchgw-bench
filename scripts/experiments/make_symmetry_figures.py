@@ -44,8 +44,8 @@ TITLE_SIZE = 12
 FIG_DPI = 130
 VIEW_3D = dict(elev=30, azim=-60)
 BOX_ASPECT_3D = (1.6, 1.6, 1.0)
-SURFACE_ALPHA = 0.20  # faint so scatter stays readable
-TAIL_STRIP_ALPHA = 0.18
+SURFACE_ALPHA = 0.35  # opaque enough to read the swirl through the scatter
+TAIL_STRIP_ALPHA = 0.30
 
 
 def _apply_3d_view(ax) -> None:
@@ -174,14 +174,17 @@ def _bundle_closest(
 # ---- Figure 1: dataset showcase (3D source → 2D target) -----------------
 
 def make_datasets_figure() -> Path:
-    """Per-region showcase: each row zooms into one region (main spiral /
-    long tail / short tail) with 3D source on the left, 2D target on the
-    right, and parameter-matched correspondence lines linking them.
+    """One panel-pair per cluster of 10 source points and their 10 matched
+    target points. Five clusters total: three on the spiral backbone, one on
+    the long tail, one on the short tail.
 
-    The other two regions appear as faint grey background in every panel
-    so the reader keeps the overall shape in mind.
+    Every panel shows the *full* point cloud as small faint dots so the
+    reader sees the whole manifold; the active 10 points are highlighted
+    with the region's marker (○ / ▲ / ■), full viridis colour, and a
+    black edge. Lines link the 10 source points to their 10 matched
+    target points.
     """
-    N_SRC, N_TGT = 1400, 1200  # denser point clouds per user request
+    N_SRC, N_TGT = 4000, 5000
     X, a_src, L_src = c3.sample_branched_swiss_roll(n=N_SRC, seed=0)
     Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=N_TGT, seed=1)
     arclen_max = float(max(a_src.max(), a_tgt.max()))
@@ -200,87 +203,92 @@ def make_datasets_figure() -> Path:
     data_cmap = plt.get_cmap(DATA_CMAP)
     norm = mcolors.Normalize(vmin=0, vmax=arclen_max)
 
-    # Fork-strip overlay parameters (shared across rows)
     base_x = float(np.cos(9.0)); base_y = float(np.sin(9.0))
     (d1x, d1y), (d2x, d2y) = c3._asymmetric_tail_directions(9.0, np.pi / 6)
 
-    fig = plt.figure(figsize=(13, 15))
-    gs = GridSpec(3, 2, figure=fig, wspace=0.18, hspace=0.28,
+    # Five clusters: (anchor_arclen, src_mask, tgt_mask, marker, label)
+    clusters = [
+        (0.6,            src_main,  tgt_main,  "o", "spiral inner (arclen ≈ 0.6)"),
+        (2.5,            src_main,  tgt_main,  "o", "spiral middle (arclen ≈ 2.5)"),
+        (4.5,            src_main,  tgt_main,  "o", "spiral outer (arclen ≈ 4.5)"),
+        (fork_s + 0.6,   src_long,  tgt_long,  "^", "long tail (arclen ≈ fork+0.6)"),
+        (fork_s + 0.3,   src_short, tgt_short, "s", "short tail (arclen ≈ fork+0.3)"),
+    ]
+    n_per_cluster = 10
+
+    fig = plt.figure(figsize=(13, 24))
+    gs = GridSpec(5, 2, figure=fig, wspace=0.18, hspace=0.30,
                    left=0.05, right=0.92)
 
-    regions = [
-        # (short_name, src_mask, tgt_mask, marker, size, n_anchors, n_per_bundle)
-        ("main spiral (backbone)", src_main, tgt_main, "o", 14, 5, 4),
-        ("long tail (backbone cont.)", src_long, tgt_long, "^", 22, 4, 4),
-        ("short tail (off-axis branch)", src_short, tgt_short, "s", 24, 3, 4),
-    ]
-
     last_sc = None
-    for row, (name, sm, tm, marker, size, n_anch, n_pb) in enumerate(regions):
+    for row, (anchor, sm, tm, marker, label) in enumerate(clusters):
+        # Pick the n closest source points and n closest target points to anchor
+        src_dist = np.where(sm, np.abs(a_src - anchor), np.inf)
+        tgt_dist = np.where(tm, np.abs(a_tgt - anchor), np.inf)
+        src_idx = np.argsort(src_dist)[:n_per_cluster]
+        tgt_idx = np.argsort(tgt_dist)[:n_per_cluster]
+        src_idx = src_idx[np.argsort(a_src[src_idx])]
+        tgt_idx = tgt_idx[np.argsort(a_tgt[tgt_idx])]
+
+        src_active = np.zeros(N_SRC, dtype=bool); src_active[src_idx] = True
+        tgt_active = np.zeros(N_TGT, dtype=bool); tgt_active[tgt_idx] = True
+
         # --- 3D source panel ---------------------------------------------
         ax_src = fig.add_subplot(gs[row, 0], projection="3d")
-        _overlay_swiss_roll_surface(ax_src, vmax=arclen_max, alpha=0.15)
+        _overlay_swiss_roll_surface(ax_src, vmax=arclen_max, alpha=SURFACE_ALPHA)
         _overlay_tail_strip(ax_src, (base_x, base_y), (d1x, d1y), length=1.2,
-                              alpha=0.15)
+                              alpha=TAIL_STRIP_ALPHA)
         _overlay_tail_strip(ax_src, (base_x, base_y), (d2x, d2y), length=0.6,
-                              alpha=0.15)
-        # Other regions in faint grey for context
+                              alpha=TAIL_STRIP_ALPHA)
+        # All non-active points as small faint plain dots
         ax_src.scatter(
-            X_display[~sm, 0], X_display[~sm, 1], X_display[~sm, 2],
-            c="lightgray", s=5, alpha=0.22, edgecolors="none", depthshade=True,
+            X_display[~src_active, 0], X_display[~src_active, 1],
+            X_display[~src_active, 2],
+            c="lightgray", s=1.5, alpha=0.20, edgecolors="none", depthshade=True,
         )
-        # Active region in full viridis
+        # Highlighted cluster: arclen-coloured, region marker, black edge
         ax_src.scatter(
-            X_display[sm, 0], X_display[sm, 1], X_display[sm, 2],
-            c=a_src[sm], cmap=DATA_CMAP, s=size, vmin=0, vmax=arclen_max,
-            marker=marker, edgecolors="black", linewidths=0.25,
+            X_display[src_idx, 0], X_display[src_idx, 1], X_display[src_idx, 2],
+            c=a_src[src_idx], cmap=DATA_CMAP, s=70, vmin=0, vmax=arclen_max,
+            marker=marker, edgecolors="black", linewidths=0.8,
         )
         ax_src.set_xlim(-XY_LIM, XY_LIM); ax_src.set_ylim(-XY_LIM, XY_LIM)
         ax_src.set_zlim(0, 1.0)
         _apply_3d_view(ax_src)
-        ax_src.set_title(f"Source 3D · {name}", fontsize=TITLE_SIZE)
+        ax_src.set_title(f"Source 3D · {label}", fontsize=TITLE_SIZE)
 
         # --- 2D target panel ---------------------------------------------
         ax_tgt = fig.add_subplot(gs[row, 1])
         ax_tgt.scatter(
-            Y[~tm, 0], Y[~tm, 1],
-            c="lightgray", s=5, alpha=0.3, edgecolors="none",
+            Y[~tgt_active, 0], Y[~tgt_active, 1],
+            c="lightgray", s=1.5, alpha=0.25, edgecolors="none",
         )
         sc = ax_tgt.scatter(
-            Y[tm, 0], Y[tm, 1], c=a_tgt[tm], cmap=DATA_CMAP, s=size,
-            vmin=0, vmax=arclen_max, marker=marker,
+            Y[tgt_idx, 0], Y[tgt_idx, 1], c=a_tgt[tgt_idx], cmap=DATA_CMAP,
+            s=70, vmin=0, vmax=arclen_max, marker=marker,
+            edgecolors="black", linewidths=0.8,
         )
         last_sc = sc
         ax_tgt.set_xlim(-XY_LIM, XY_LIM); ax_tgt.set_ylim(-XY_LIM, XY_LIM)
         ax_tgt.set_aspect("equal")
-        ax_tgt.set_xlabel("target x")
-        ax_tgt.set_ylabel("target y")
-        ax_tgt.set_title(f"Target 2D · {name}", fontsize=TITLE_SIZE)
+        ax_tgt.set_xlabel("target x"); ax_tgt.set_ylabel("target y")
+        ax_tgt.set_title(f"Target 2D · {label}", fontsize=TITLE_SIZE)
 
-        # --- Correspondence line bundles for this region -----------------
-        region_s_min = float(a_src[sm].min())
-        region_s_max = float(a_src[sm].max())
-        # Avoid endpoints so lines don't pile up on the boundary
-        anchors = np.linspace(region_s_min, region_s_max, n_anch + 2)[1:-1]
-        bundles = []
-        for anchor in anchors:
-            si, ti = _bundle_closest(
-                a_src, a_tgt, float(anchor), n=n_pb, src_mask=sm, tgt_mask=tm,
-            )
-            bundles.append((si, ti, data_cmap(norm(float(anchor)))))
+        # --- Correspondence lines (10 lines, one per src/tgt pair) -------
+        bundle_color = data_cmap(norm(float(anchor)))
+        bundles = [(src_idx, tgt_idx, bundle_color)]
         _add_bundled_lines(fig, ax_src, ax_tgt, X_display, Y, bundles,
-                             alpha=0.55, linewidth=1.0)
+                             alpha=0.65, linewidth=1.2)
 
-    # Single shared colorbar on the far right of the figure (own axes
-    # so it doesn't reflow the gridspec).
+    # Shared colorbar pinned to the figure's right gutter
     if last_sc is not None:
         cbar_ax = fig.add_axes((0.94, 0.18, 0.014, 0.66))
         cbar = fig.colorbar(last_sc, cax=cbar_ax, label="geodesic arclen")
         cbar.ax.tick_params(labelsize=9)
 
     fig.suptitle(
-        "Dataset per region — 3D Swiss roll (source) → 2D spiral (target), "
-        "N={n_src} / K={n_tgt}".format(n_src=N_SRC, n_tgt=N_TGT),
+        f"Five source clusters → matched target clusters · "
+        f"3D Swiss roll N={N_SRC} → 2D spiral K={N_TGT}",
         fontsize=13, y=0.995,
     )
     out = FIG_DIR / "datasets.png"
@@ -295,8 +303,8 @@ def make_solver_effects_figure() -> Path:
     """2 panels: pure GW vs FGW on the C3 Y-fork task (3D → 2D).
     Target 2D points coloured by argmax-matched source arclen.
     """
-    X, a_src, L_src = c3.sample_branched_swiss_roll(n=1400, seed=0)
-    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=1200, seed=1)
+    X, a_src, L_src = c3.sample_branched_swiss_roll(n=4000, seed=0)
+    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=5000, seed=1)
     arclen_max = float(max(a_src.max(), a_tgt.max()))
     fork_s = float(c3.spiral_arclen(9.0).item())
 
@@ -371,8 +379,8 @@ def make_solver_effects_figure() -> Path:
 # ---- Figure 3: Spearman bar comparison ----------------------------------
 
 def make_spearman_bar_figure() -> Path:
-    X, a_src, L_src = c3.sample_branched_swiss_roll(n=1400, seed=0)
-    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=1200, seed=1)
+    X, a_src, L_src = c3.sample_branched_swiss_roll(n=4000, seed=0)
+    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=5000, seed=1)
 
     T_pure = c3.run_torchgw_landmark(X, Y, seed=0)["T"]
     T_fgw = c3.run_torchgw_fused(X, Y, a_src, a_tgt, seed=0)["T"]
@@ -423,8 +431,8 @@ def make_spearman_bar_figure() -> Path:
 # ---- Figure 4: C3 deep-dive ---------------------------------------------
 
 def make_c3_zoom_figure() -> Path:
-    X, a_src, L_src = c3.sample_branched_swiss_roll(n=1400, seed=0)
-    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=1200, seed=1)
+    X, a_src, L_src = c3.sample_branched_swiss_roll(n=4000, seed=0)
+    Y, a_tgt, L_tgt = c3.sample_branched_spiral(n=5000, seed=1)
     arclen_max = float(max(a_src.max(), a_tgt.max()))
     fork_s = float(c3.spiral_arclen(9.0).item())
     T = c3.run_torchgw_fused(X, Y, a_src, a_tgt, seed=0)["T"]
