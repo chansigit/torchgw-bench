@@ -131,7 +131,34 @@ def test_main_arclen_spearman_reverse_gives_negative():
     assert pytest.approx(rho, abs=1e-6) == -1.0
 
 
-# ---- solver wrapper -----------------------------------------------------
+# ---- geodesic arclen ----------------------------------------------------
+
+def test_spiral_arclen_monotone_and_positive():
+    thetas = np.linspace(0, 9, 20)
+    s = run.spiral_arclen(thetas)
+    assert np.all(np.diff(s) > 0)
+    assert s[0] == 0.0
+    # Total spiral arc length should be around 5.9 for r_min=0.3, r_max=1.0
+    assert 5.5 < s[-1] < 6.2
+
+
+def test_arclens_on_branched_manifold_are_geodesic():
+    """Tail 1 and tail 2 points share a common fork-base arclen offset;
+    tail 2 max arclen is strictly less than tail 1 max arclen."""
+    _, arclens, labels = run.sample_branched_spiral(
+        n=400, branch_frac=0.3, tail1_len=1.2, tail2_len=0.6,
+        noise=0.0, seed=0,
+    )
+    fork_s = float(run.spiral_arclen(9.0).item())
+    tail1_arclens = arclens[(labels == 0) & (arclens > fork_s - 1e-6)]
+    tail2_arclens = arclens[labels == 1]
+    assert tail1_arclens.max() > tail2_arclens.max() + 0.4
+    # Both tail regions start at the fork
+    assert abs(tail1_arclens.min() - fork_s) < 0.1
+    assert abs(tail2_arclens.min() - fork_s) < 0.1
+
+
+# ---- solver wrappers ----------------------------------------------------
 
 def test_run_torchgw_landmark_returns_expected_fields():
     X, _, _ = run.sample_branched_spiral(n=60, seed=0)
@@ -143,3 +170,18 @@ def test_run_torchgw_landmark_returns_expected_fields():
     }
     assert out["T"].shape == (60, 80)
     assert out["wall_s"] > 0
+
+
+def test_run_torchgw_fused_returns_expected_fields():
+    X, src_arclens, _ = run.sample_branched_spiral(n=60, seed=0)
+    Y, tgt_arclens, _ = run.sample_branched_swiss_roll(n=80, seed=1)
+    out = run.run_torchgw_fused(
+        X, Y, src_arclens, tgt_arclens,
+        seed=0, max_iter=50, M_samples=40, n_landmarks=30,
+    )
+    assert set(out.keys()) >= {
+        "T", "gw_cost", "marginal_error", "wall_s",
+        "gpu_peak_gb", "iterations", "hyperparams", "solver_version",
+    }
+    assert out["T"].shape == (60, 80)
+    assert out["hyperparams"]["fgw_alpha"] == 0.5

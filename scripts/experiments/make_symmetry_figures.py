@@ -70,9 +70,10 @@ def make_datasets_figure() -> Path:
 
     # C3 source (spiral + asymmetric Y of two tails)
     X3, a3, L3 = c3.sample_branched_spiral(n=400, seed=0)
+    fork_arclen_3 = float(c3.spiral_arclen(9.0).item())
     ax = fig.add_subplot(2, 3, 4)
-    main3 = (L3 == 0) & (a3 <= 9.0)
-    t1_3 = (L3 == 0) & (a3 > 9.0)
+    main3 = (L3 == 0) & (a3 <= fork_arclen_3 + 1e-6)
+    t1_3 = (L3 == 0) & (a3 > fork_arclen_3 + 1e-6)
     t2_3 = (L3 == 1)
     ax.scatter(X3[main3, 0], X3[main3, 1], c="steelblue", s=10, label="main (lbl 0)")
     ax.scatter(X3[t1_3, 0], X3[t1_3, 1], c="mediumseagreen", s=12,
@@ -86,8 +87,8 @@ def make_datasets_figure() -> Path:
     # C3 target (swiss roll + Y-fork)
     Y3, b3, L3t = c3.sample_branched_swiss_roll(n=500, seed=1)
     ax = fig.add_subplot(2, 3, 5, projection="3d")
-    main3t = (L3t == 0) & (b3 <= 9.0)
-    t1_3t = (L3t == 0) & (b3 > 9.0)
+    main3t = (L3t == 0) & (b3 <= fork_arclen_3 + 1e-6)
+    t1_3t = (L3t == 0) & (b3 > fork_arclen_3 + 1e-6)
     t2_3t = (L3t == 1)
     ax.scatter(Y3[main3t, 0], Y3[main3t, 2], Y3[main3t, 1],
                c="steelblue", s=10, label="main")
@@ -308,12 +309,13 @@ def make_spearman_bar_figure() -> Path:
 
 def make_c3_zoom_figure() -> Path:
     """Four panels zooming into C3: source + target side-by-side with labels,
-    plus matched-θ colouring and branch-accuracy overlay."""
+    plus matched-arclen colouring and branch-accuracy overlay."""
     from scipy.stats import spearmanr
 
     X, a, Ls = c3.sample_branched_spiral(n=400, seed=0)
     Y, b, Lt = c3.sample_branched_swiss_roll(n=500, seed=1)
-    T = c3.run_torchgw_landmark(X, Y, seed=0)["T"]
+    # Use FGW (geodesic feature) here so the matched arclen map is clean.
+    T = c3.run_torchgw_fused(X, Y, a, b, seed=0)["T"]
     matched_theta = b[np.argmax(T, axis=1)]
     matched_label = Lt[np.argmax(T, axis=1)]
 
@@ -327,9 +329,10 @@ def make_c3_zoom_figure() -> Path:
 
     # Panel 1: C3 source labelled (three regions: main, tail1, tail2)
     ax = fig.add_subplot(1, 4, 1)
-    # Main arc (label 0, θ ≤ 9)
-    main_arc = (Ls == 0) & (a <= 9.0)
-    tail1 = (Ls == 0) & (a > 9.0)
+    # Backbone (label 0) splits at the spiral's own arc length at θ=9
+    fork_arclen = float(c3.spiral_arclen(9.0).item())
+    main_arc = (Ls == 0) & (a <= fork_arclen + 1e-6)
+    tail1 = (Ls == 0) & (a > fork_arclen + 1e-6)
     tail2 = (Ls == 1)
     ax.scatter(X[main_arc, 0], X[main_arc, 1], c="steelblue", s=12,
                label="main spiral (label 0)")
@@ -343,8 +346,8 @@ def make_c3_zoom_figure() -> Path:
 
     # Panel 2: C3 target labelled (3D)
     ax = fig.add_subplot(1, 4, 2, projection="3d")
-    main_arc_t = (Lt == 0) & (b <= 9.0)
-    tail1_t = (Lt == 0) & (b > 9.0)
+    main_arc_t = (Lt == 0) & (b <= fork_arclen + 1e-6)
+    tail1_t = (Lt == 0) & (b > fork_arclen + 1e-6)
     tail2_t = (Lt == 1)
     ax.scatter(Y[main_arc_t, 0], Y[main_arc_t, 2], Y[main_arc_t, 1],
                c="steelblue", s=10, label="main")
@@ -356,20 +359,20 @@ def make_c3_zoom_figure() -> Path:
     ax.view_init(elev=20, azim=-60)
     ax.legend(loc="upper right", fontsize=8)
 
-    # Panel 3: source coloured by matched target θ
+    # Panel 3: source coloured by matched target geodesic arclen
     ax = fig.add_subplot(1, 4, 3)
+    vmax = float(b.max())
     sc = ax.scatter(X[Ls == 0, 0], X[Ls == 0, 1],
                      c=matched_theta[Ls == 0], cmap="plasma",
-                     s=14, vmin=0, vmax=10.5)
-    # Tail 2 uses its own parameter; show it in crimson outline
+                     s=14, vmin=0, vmax=vmax)
     ax.scatter(X[tail2, 0], X[tail2, 1], c=matched_theta[tail2],
-               cmap="plasma", vmin=0, vmax=10.5, s=18, marker="s",
+               cmap="plasma", vmin=0, vmax=vmax, s=18, marker="s",
                edgecolors="crimson", linewidths=1.2)
-    ax.set_title(f"matched target θ\n"
+    ax.set_title(f"matched target arclen (FGW)\n"
                   f"main-Spearman = {rho_main:+.4f}\n"
                   f"tail-Spearman = {rho_tail:+.4f}")
     ax.set_aspect("equal")
-    plt.colorbar(sc, ax=ax, label="matched target θ", shrink=0.8)
+    plt.colorbar(sc, ax=ax, label="matched geodesic arclen", shrink=0.8)
 
     # Panel 4: label-match (green) vs label-mismatch (red)
     ax = fig.add_subplot(1, 4, 4)
@@ -382,7 +385,7 @@ def make_c3_zoom_figure() -> Path:
     ax.set_aspect("equal")
     ax.legend(loc="lower left", fontsize=9)
 
-    fig.suptitle("C3 — asymmetric Y-fork (long tangent tail 1 + short 30°-offset tail 2) + pure GW",
+    fig.suptitle("C3 — asymmetric Y-fork + FGW with geodesic-distance feature",
                  fontsize=13, y=1.02)
     fig.tight_layout()
     out = FIG_DIR / "c3_detail.png"

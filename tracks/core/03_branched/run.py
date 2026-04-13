@@ -24,6 +24,28 @@ def _spiral_tangent(theta_end: float, r_max: float = 1.0, r_min: float = 0.3,
     return float(dx / norm), float(dy / norm)
 
 
+def spiral_arclen(
+    theta: float | np.ndarray,
+    r_min: float = 0.3, r_max: float = 1.0, theta_max: float = 9.0,
+) -> np.ndarray:
+    """Arc length along the Archimedean spiral r(θ) = r_min + b·θ from 0 to θ.
+
+    Closed-form: ∫₀^θ √(r² + b²) dθ with r = r_min + b·θ. Substituting u = r,
+    du = b dθ gives ∫√(u² + b²) du / b, a standard integral:
+        F(u) = ½ [u·√(u²+b²) + b²·ln(u + √(u²+b²))]
+        arclen(θ) = [F(r_min + b·θ) - F(r_min)] / b
+    """
+    theta_arr = np.asarray(theta, dtype=np.float64)
+    b = (r_max - r_min) / theta_max
+    a = r_min
+
+    def _F(u: np.ndarray) -> np.ndarray:
+        return 0.5 * (u * np.sqrt(u * u + b * b)
+                      + b * b * np.log(u + np.sqrt(u * u + b * b)))
+
+    return (_F(a + b * theta_arr) - _F(np.asarray(a, dtype=np.float64))) / b
+
+
 def _asymmetric_tail_directions(
     theta_tail_start: float, tail2_angle: float,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -63,29 +85,30 @@ def _build_branched_manifold(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Shared backbone for spiral (2D) and Swiss-roll (3D) Y-fork datasets.
 
-    Layout:
-        main spiral (θ ∈ [0, theta_tail_start]) + tail 1 (tangent continuation)
-        together carry label 0 and form one continuous arc parameterised by
-        θ ∈ [0, theta_tail_start + tail1_len].
-        tail 2 (splayed 30° outward from tail 1) carries label 1 and has its
-        own parametric variable s ∈ (0, tail2_len].
+    Returns `(points, arclens, labels)`. The `arclens` field is the
+    **geodesic distance from the spiral's inner end (θ=0)** along the
+    manifold: it walks the spiral first, then continues along whichever
+    tail the point lies on. Because tail 2 is shorter, the tail-2 arclen
+    range `[arclen(9), arclen(9)+tail2_len]` is strictly contained in the
+    tail-1 range `[arclen(9), arclen(9)+tail1_len]` — so a tail-1 point
+    with s > tail2_len has no tail-2 counterpart at the same arclen, which
+    is the signal an FGW feature term can exploit.
     """
     rng = np.random.default_rng(seed)
     n_tail_total = int(round(n * branch_frac))
     n_main = n - n_tail_total
 
-    # Split tail points between tail 1 and tail 2 proportionally to length
-    # so the linear density stays roughly uniform.
+    # Allocate tail points proportionally to length for uniform linear density.
     total_tail_len = tail1_len + tail2_len
     n_t1 = int(round(n_tail_total * tail1_len / max(total_tail_len, 1e-9)))
     n_t2 = n_tail_total - n_t1
 
     # Main spiral
     radius = np.linspace(0.3, 1.0, n_main)
-    angles_main = np.linspace(0.0, theta_tail_start, n_main)
+    thetas_main = np.linspace(0.0, theta_tail_start, n_main)
     eps = rng.normal(size=(2, n_main)) * noise
-    x_main = (radius + eps[0]) * np.cos(angles_main)
-    y_main = (radius + eps[1]) * np.sin(angles_main)
+    x_main = (radius + eps[0]) * np.cos(thetas_main)
+    y_main = (radius + eps[1]) * np.sin(thetas_main)
 
     # Fork origin (outer spiral endpoint)
     base_x = 1.0 * np.cos(theta_tail_start)
@@ -105,11 +128,11 @@ def _build_branched_manifold(
     x1, y1, s1 = _tail_points(n_t1, d1x, d1y, tail1_len)
     x2, y2, s2 = _tail_points(n_t2, d2x, d2y, tail2_len)
 
-    # Angle conventions:
-    #   tail 1 continues the spiral parameterisation: θ = theta_tail_start + s
-    #   tail 2 uses its own parameter s (will be filtered by label anyway)
-    angles_t1 = theta_tail_start + s1
-    angles_t2 = s2.copy()
+    # Geodesic arc lengths from θ=0 along the manifold
+    main_arclens = spiral_arclen(thetas_main)
+    fork_arclen = float(spiral_arclen(theta_tail_start).item())
+    tail1_arclens = fork_arclen + s1
+    tail2_arclens = fork_arclen + s2
 
     # Labels: main + tail1 = 0 (the "backbone" arc); tail2 = 1 (the true branch)
     labels = np.concatenate((
@@ -135,8 +158,8 @@ def _build_branched_manifold(
             axis=0,
         ).astype(np.float32)
 
-    angles = np.concatenate((angles_main, angles_t1, angles_t2))
-    return points, angles, labels
+    arclens = np.concatenate((main_arclens, tail1_arclens, tail2_arclens))
+    return points, arclens, labels
 
 
 def sample_branched_spiral(
@@ -155,18 +178,17 @@ def sample_branched_spiral(
     direction) for `tail1_len` units. Tail 2 is a shorter branch, rotated
     `tail2_angle` away from tail 1 toward the outward radial, with length
     `tail2_len < tail1_len`. Point counts are allocated proportionally to
-    length so the linear density stays roughly uniform.
+    length so linear density is uniform.
 
     Labels: main spiral + tail 1 = 0 (a continuous "backbone" arc),
-            tail 2 = 1 (the off-axis branch). Forward matching therefore
-            requires src-label-0 to land on tgt-label-0 and src-label-1 to
-            land on tgt-label-1 across the Y.
+            tail 2 = 1 (the off-axis branch).
 
     Returns:
         points: (n, 2) float32
-        angles: (n,) float64 — main + tail1 share a common parameterisation
-                θ ∈ [0, theta_tail_start + tail1_len]; tail2 uses its own
-                parameter s ∈ (0, tail2_len].
+        arclens: (n,) float64 — **geodesic distance from the spiral's inner
+                end (θ=0)** along the manifold. For main points it's the
+                analytical arc length of r(θ)=0.3+0.0778·θ. For tail 1 /
+                tail 2 points at parameter s, it's arclen(9) + s.
         labels: (n,) int — 0 = main+tail1 backbone, 1 = tail2 branch
     """
     return _build_branched_manifold(
@@ -190,7 +212,8 @@ def sample_branched_swiss_roll(
     """3D Swiss roll with an asymmetric Y-fork — same shape as the 2D spiral
     but with an independent uniform z coordinate per point.
 
-    See `sample_branched_spiral` for label/angle conventions.
+    See `sample_branched_spiral` for label / arclens conventions. Returns
+    (points, arclens, labels).
     """
     return _build_branched_manifold(
         n, embed_3d=True,
@@ -212,14 +235,14 @@ def branch_accuracy(T: np.ndarray, src_labels: np.ndarray, tgt_labels: np.ndarra
 
 def _signed_spearman_on_subset(
     T: np.ndarray,
-    src_angles: np.ndarray,
+    src_coord: np.ndarray,
     src_mask: np.ndarray,
-    tgt_angles: np.ndarray,
+    tgt_coord: np.ndarray,
 ) -> float:
     if src_mask.sum() < 2:
         return float("nan")
-    matched = tgt_angles[np.argmax(T, axis=1)]
-    result = spearmanr(src_angles[src_mask], matched[src_mask])
+    matched = tgt_coord[np.argmax(T, axis=1)]
+    result = spearmanr(src_coord[src_mask], matched[src_mask])
     rho = getattr(result, "statistic", None)
     if rho is None:
         rho = result.correlation  # type: ignore[attr-defined]
@@ -228,36 +251,30 @@ def _signed_spearman_on_subset(
 
 def main_arclen_spearman(
     T: np.ndarray,
-    src_angles: np.ndarray,
+    src_arclens: np.ndarray,
     src_labels: np.ndarray,
-    tgt_angles: np.ndarray,
-    tgt_labels: np.ndarray,  # noqa: ARG001 — accepted for interface symmetry
+    tgt_arclens: np.ndarray,
+    tgt_labels: np.ndarray,  # noqa: ARG001
 ) -> float:
-    """Signed Spearman rho on the "backbone" (main spiral + tail 1, label == 0).
-
-    The backbone is a continuous curve parameterised by θ ∈ [0, 9 + tail1_len],
-    so a forward match should give +1 here.
+    """Signed Spearman rho on the backbone (main spiral + tail 1, label==0),
+    using geodesic distance from the spiral start as the coordinate.
     """
     del tgt_labels
-    return _signed_spearman_on_subset(T, src_angles, src_labels == 0, tgt_angles)
+    return _signed_spearman_on_subset(T, src_arclens, src_labels == 0, tgt_arclens)
 
 
 def tail_arclen_spearman(
     T: np.ndarray,
-    src_angles: np.ndarray,
+    src_arclens: np.ndarray,
     src_labels: np.ndarray,
-    tgt_angles: np.ndarray,
+    tgt_arclens: np.ndarray,
     tgt_labels: np.ndarray,  # noqa: ARG001
 ) -> float:
-    """Signed Spearman rho on the off-axis branch (tail 2, label == 1).
-
-    Tail 2 uses its own parameter s ∈ (0, tail2_len]. A clean branch match
-    (source tail 2 → target tail 2, monotone in s) gives +1. A mismatch
-    (e.g. source tail 2 mapped onto target main arc) gives a value whose
-    sign and magnitude depend on how far the match drifts.
+    """Signed Spearman rho on the off-axis branch (tail 2, label==1), using
+    geodesic distance as the coordinate.
     """
     del tgt_labels
-    return _signed_spearman_on_subset(T, src_angles, src_labels == 1, tgt_angles)
+    return _signed_spearman_on_subset(T, src_arclens, src_labels == 1, tgt_arclens)
 
 
 # ---- host / record ------------------------------------------------------
@@ -367,6 +384,100 @@ def run_torchgw_landmark(
     }
 
 
+# ---- FGW solver using geodesic-distance feature -------------------------
+
+def _build_feature_cost(
+    src_arclens: np.ndarray, tgt_arclens: np.ndarray,
+) -> np.ndarray:
+    """Normalised (n_src, n_tgt) squared-Euclidean cost matrix over 1D arclens."""
+    import ot
+    F_src = src_arclens.reshape(-1, 1).astype(np.float64)
+    F_tgt = tgt_arclens.reshape(-1, 1).astype(np.float64)
+    M = np.asarray(ot.dist(F_src, F_tgt, metric="sqeuclidean"), dtype=np.float64)
+    M /= (M.max() + 1e-12)
+    return M
+
+
+def run_torchgw_fused(
+    X: np.ndarray,
+    Y: np.ndarray,
+    src_arclens: np.ndarray,
+    tgt_arclens: np.ndarray,
+    seed: int = 0,
+    epsilon: float = 5e-3,
+    M_samples: int = 80,
+    max_iter: int = 300,
+    k: int = 5,
+    n_landmarks: int = 50,
+    fgw_alpha: float = 0.5,
+) -> dict:
+    """torchgw sampled_gw in FGW mode with geodesic-distance feature.
+
+    Uses the same landmark distance mode and hyperparameters as
+    run_torchgw_landmark, plus an inter-domain feature cost built from each
+    point's geodesic distance from the spiral start. Because tail 2 arclens
+    live in a strict subset of tail 1 arclens (tail 2 is shorter), FGW can
+    use the feature term to reject the "tail swap" that pure GW is prone to.
+    """
+    import torch
+    from torchgw import sampled_gw
+    import torchgw as _torchgw
+
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.synchronize()
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    M_feat = _build_feature_cost(src_arclens, tgt_arclens)
+
+    t0 = time.perf_counter()
+    T, log = sampled_gw(  # type: ignore[misc]
+        X, Y,
+        distance_mode="landmark",
+        mixed_precision=True,
+        M=M_samples,
+        epsilon=epsilon,
+        max_iter=max_iter,
+        k=k,
+        n_landmarks=n_landmarks,
+        fgw_alpha=fgw_alpha,
+        C_linear=M_feat,
+        log=True,
+        verbose=False,
+    )
+    log_d: dict = log if isinstance(log, dict) else {}  # type: ignore[arg-type]
+    if use_cuda:
+        torch.cuda.synchronize()
+    wall_s = time.perf_counter() - t0
+
+    T_np = T.detach().cpu().numpy() if hasattr(T, "detach") else np.asarray(T)
+    marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - 1.0 / T_np.shape[0])))
+    gpu_peak_gb = torch.cuda.max_memory_allocated() / (1024 ** 3) if use_cuda else None
+
+    return {
+        "T": T_np,
+        "gw_cost": float(log_d.get("gw_cost", float("nan"))),
+        "marginal_error": marginal_error,
+        "wall_s": wall_s,
+        "gpu_peak_gb": gpu_peak_gb,
+        "iterations": int(log_d.get("n_iter", log_d.get("iterations", 0))),
+        "hyperparams": {
+            "M_samples": M_samples,
+            "epsilon": epsilon,
+            "max_iter": max_iter,
+            "k": k,
+            "n_landmarks": n_landmarks,
+            "fgw_alpha": fgw_alpha,
+            "distance_mode": "landmark",
+            "mixed_precision": True,
+        },
+        "solver_version": f"torchgw=={getattr(_torchgw, '__version__', 'unknown')}",
+    }
+
+
 # ---- main ---------------------------------------------------------------
 
 def main() -> None:
@@ -375,7 +486,8 @@ def main() -> None:
     from pathlib import Path
 
     ap = argparse.ArgumentParser(description="C3 Branched track: branched spiral → branched swiss roll")
-    ap.add_argument("--solver", required=True, choices=["torchgw-landmark"])
+    ap.add_argument("--solver", required=True,
+                    choices=["torchgw-landmark", "torchgw-fused"])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--subset", default="full", choices=["small", "full"])
@@ -418,13 +530,13 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        X, src_angles, src_labels = sample_branched_spiral(
+        X, src_arclens, src_labels = sample_branched_spiral(
             args.n_source, branch_frac=args.branch_frac,
             theta_tail_start=args.theta_tail_start,
             tail1_len=args.tail1_len, tail2_len=args.tail2_len,
             tail2_angle=args.tail2_angle, seed=args.seed,
         )
-        Y, tgt_angles, tgt_labels = sample_branched_swiss_roll(
+        Y, tgt_arclens, tgt_labels = sample_branched_swiss_roll(
             args.n_target, branch_frac=args.branch_frac,
             theta_tail_start=args.theta_tail_start,
             tail1_len=args.tail1_len, tail2_len=args.tail2_len,
@@ -433,6 +545,8 @@ def main() -> None:
 
         if args.solver == "torchgw-landmark":
             result = run_torchgw_landmark(X, Y, seed=args.seed)
+        elif args.solver == "torchgw-fused":
+            result = run_torchgw_fused(X, Y, src_arclens, tgt_arclens, seed=args.seed)
         else:
             raise ValueError(f"unknown solver: {args.solver}")
 
@@ -445,10 +559,10 @@ def main() -> None:
         rec["metrics"]["task"] = {
             "branch_accuracy": branch_accuracy(result["T"], src_labels, tgt_labels),
             "main_arclen_spearman": main_arclen_spearman(
-                result["T"], src_angles, src_labels, tgt_angles, tgt_labels,
+                result["T"], src_arclens, src_labels, tgt_arclens, tgt_labels,
             ),
             "tail_arclen_spearman": tail_arclen_spearman(
-                result["T"], src_angles, src_labels, tgt_angles, tgt_labels,
+                result["T"], src_arclens, src_labels, tgt_arclens, tgt_labels,
             ),
         }
         rec["metrics"]["efficiency"] = {

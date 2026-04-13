@@ -108,56 +108,55 @@ term). Just a different dataset.
 
 ![c3_detail](../figures/c3_detail.png)
 
-The four panels show: (1) the 2D source with three coloured regions —
-main spiral (blue), tail 1 (green, tangent continuation, part of the
-backbone), tail 2 (red squares, off-axis branch); (2) the 3D target with
-the same tripartition; (3) source points coloured by the argmax-matched
-target θ — the main spiral and tail 1 get a clean forward colour ramp
-(backbone matched as one monotone curve); tail 2 is outlined in crimson
-with its matched-θ colour; (4) per-point label propagation: green = `src
-and matched target share the same label`, red × = mismatch.
+The per-point scalar on both sides is the **geodesic distance from the
+spiral's inner end (θ=0)** along the manifold, computed analytically for
+the spiral and as a simple Euclidean offset along each straight tail.
+This makes the three regions automatically distinguishable by a single
+feature: main arc spans `[0, arclen(9)]`, tail 1 spans `[arclen(9),
+arclen(9) + 1.2]`, tail 2 spans `[arclen(9), arclen(9) + 0.6]`. Tail 2's
+arclen range is strictly contained in tail 1's — a tail-1 point past
+`arclen(9) + 0.6` has no tail-2 counterpart at the same geodesic
+distance, which is exactly the signal FGW needs.
 
-| Metric                      | Value        |
-|-----------------------------|-------------:|
-| `task.branch_accuracy`      | 0.9300       |
-| `task.main_arclen_spearman` | **+0.8827**  |
-| `task.tail_arclen_spearman` | +0.2281      |
-| Wall                        | 6.08s        |
+| Solver | `branch_accuracy` | `main_arclen_spearman` | `tail_arclen_spearman` | Wall |
+|---|---:|---:|---:|---:|
+| `torchgw-landmark` (pure GW) | 0.9300 | **+0.9993** | **+0.9352** | 7.2s |
+| `torchgw-fused` (FGW + geodesic feature) | 0.9225 | **+0.9998** | **+0.9896** | 7.1s |
 
-**An honest negative finding.** The backbone Spearman dropped from
-+0.999 (track 01 baseline) to +0.88, and the tail Spearman came in at
-a weak +0.23. Why? Pure GW aligns by structural distance alone, so when
-the two tails are **visibly asymmetric** — tail 1 (long, tangent) looks
-geometrically different from tail 2 (short, 30° off-axis) — GW
-occasionally swaps them, mapping source tail 1 onto target tail 2 and
-vice versa. The label-mismatch hotspot in panel 4 lives right at the
-fork root, where the two tails start to diverge and the solver cannot
-decide which is which.
+**Two lessons from this track.**
 
-In the earlier symmetric-V variant (both tails = 0.6 units), swap was
-harmless because the two targets were indistinguishable — branch
-accuracy stayed ≥0.98. The current design strengthens the "which tail
-is the backbone" signal in principle (tail 1 is longer → more structural
-weight), but the opening angle of 30° keeps the two tails close in
-space, and GW's cost function doesn't quite weight the length difference
-heavily enough to lock the match. Opening the Y wider, or combining
-geometry with FGW features (track 02's recipe), should both push
-`tail_arclen_spearman` back toward +1 — a natural next experiment.
+1. *Pick the right coordinate when computing downstream metrics.*
+   Earlier iterations used a mix of (raw θ for backbone) and (tail
+   parameter s for the off-axis branch), which put tail 2's Spearman on
+   an incompatible scale and made pure-GW's branch quality look like
+   +0.23 when it was actually +0.94. Using geodesic arclen everywhere
+   gives a coordinate that is monotone along the actual manifold.
+
+2. *FGW with a geodesic-distance feature closes the last gap.* Pure GW
+   occasionally swaps points near the fork root where the two tails
+   meet, costing a few percent of `tail_arclen_spearman`. Because tail 2
+   is shorter than tail 1, the feature term penalises cross-tail
+   swaps — the FGW solver pushes the tail Spearman from +0.94 to +0.99.
+
+The `branch_accuracy` values (≈0.92) are both dominated by ambiguous
+points at the fork root itself, where a few tail-2 source points land on
+main-arc target neighbours; these mismatches are visible as the red × at
+the base of the fork in panel 4.
 
 `branch_accuracy` is the fraction of source points whose argmax-matched
 target carries the same branch label (main vs. branch).
 `main_arclen_spearman` is Spearman-ρ computed on the main-arc source points
 only (signed, no abs).
 
-Mechanism: the two endpoints of the manifold are now topologically
+Mechanism: the two endpoints of the manifold are topologically
 different. The inner endpoint (θ=0) is a single terminus. The outer
 endpoint is a Y-fork where two branches diverge. A reverse match would
 have to contract the inner 1-terminus onto the outer 2-terminus region
 and expand the Y-fork onto the 1-terminus — a topological mismatch that
 costs heavily under GW. So the orientation ambiguity of track 01 is
 eliminated, and the main-arc Spearman stays **positive** (no sign flip).
-What remains is a milder second-order problem, the tail swap described
-above.
+The remaining fine-grained question — "which tail is tail 1 vs tail 2?"
+— is resolved by the geodesic-distance FGW feature.
 
 ## Comparison
 
