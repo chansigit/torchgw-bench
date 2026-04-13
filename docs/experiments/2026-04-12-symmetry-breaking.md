@@ -30,61 +30,64 @@ flips to −0.999.
 
 ![datasets](../figures/datasets.png)
 
-- **C1** (top row, first two panels): the baseline — a 2D Archimedean spiral
-  (source) and a 3D Swiss roll (target) generated from the same parametric
-  schedule θ ∈ [0, 9]. Because both manifolds are smooth, connected, and the
-  "rolling" direction can run either way, the GW optimal transport has
-  two symmetric solutions.
-- **C2** (top right): identical data to C1, but θ is passed to the solver as
-  a per-point feature. The cost matrix M ∈ ℝ^(N×K) is the squared-Euclidean
-  distance between source θ and target θ, normalised.
-- **C3** (bottom row): an **asymmetric Y-fork** is attached at θ=9. Tail 1
-  extends along the spiral's local tangent for 1.2 units (the curve
-  continuation); tail 2 is a shorter stub of length 0.6, rotated 30°
-  toward the outward radial from tail 1. `branch_frac = 0.3` of the points
-  go on the tails (allocated proportionally to length so density is
-  uniform). **Labels:** main spiral + tail 1 = 0 (together they form a
-  monotone backbone parameterised by θ ∈ [0, 10.2]); tail 2 = 1 (the
-  off-axis branch).
+Top row: **C1 / C2** share a single dataset — the classic 2D Archimedean
+spiral → 3D Swiss roll pair from track 01, θ ∈ [0, 9]. Both manifolds are
+smooth and reversal-symmetric, so pure GW has two equal optima (forward
+and reverse).
 
-All experiments use `torchgw.sampled_gw(distance_mode="landmark")` with the
-same hyperparameters (`M=80, k=5, n_landmarks=50, epsilon=5e-3, max_iter=300`)
-unless otherwise noted. C2 additionally uses `fgw_alpha=0.5` and passes the
-feature cost matrix through `C_linear`. C3 uses the same torchgw configuration
-as C1.
+Bottom row: **C3** attaches an **asymmetric Y-fork** at θ=9. Tail 1 runs
+along the spiral's local tangent for 1.2 units; tail 2 is a shorter stub
+(0.6 units) rotated 30° toward the outward radial. 30% of the points are
+allocated to the fork (proportionally by length). The per-point scalar
+shown is geodesic arclength from the spiral's inner end.
 
-### How we visualise the match
+All experiments use `torchgw.sampled_gw(distance_mode="landmark")` with
+the same hyperparameters (`M=80, k=5, n_landmarks=50, epsilon=5e-3,
+max_iter=300`). FGW variants additionally set `fgw_alpha=0.5` and pass
+the feature cost matrix via `C_linear`. C2 uses raw θ as the feature; C3
+uses geodesic arclength.
 
-For each source point we take the argmax of the transport plan row to pick
-its matched target column, then colour the source scatter by the target's θ.
-If the matching is forward, the colour ramp on the source sweeps in lockstep
-with θ as you trace the spiral from centre to edge. If it's reverse, the
-colour ramp runs backwards.
+### How to read the solver panels
 
-![matchings](../figures/matchings.png)
+For each source point we take the argmax of the transport plan row to
+pick its matched target column, then colour the source 2D scatter by the
+target's 1D scalar (θ for C1/C2, arclen for C3). A forward match paints
+the source with a colour ramp that runs from purple at the centre to
+yellow at the rim — aligned with the source's own progression. A reverse
+match produces the mirror image.
+
+![solver effects](../figures/solver_effects.png)
 
 ## Result 1: C1 flips at scale
 
-At N=400, K=500, pure GW (C1) lands on the forward match with Spearman
-≈ +0.999.
+Middle row of the solver panel: same seed, same solver, same
+hyperparameters — only N differs between the two panels in that row.
 
-At N=10,000, K=12,000 — the same seed, the same solver, the same
-hyperparameters — it lands on the reverse match with Spearman ≈ **−0.999**.
+At N=400, pure GW (left column) lands on the forward match, Spearman
+≈ **+0.999**.
 
-Look at the two leftmost panels of the matchings figure: the colour pattern
-is geometrically the same spiral, but inverted. The solver didn't fail; it
-just picked the other optimum.
+At N=10,000, pure GW flips to the reverse, Spearman ≈ **−0.999**. Look
+at the colour pattern: the yellow end (high θ) that sat at the outer rim
+of the spiral for N=400 has moved to the inner centre. The geometric
+shape is identical; the match's orientation has simply flipped.
 
 This is what motivated returning `|ρ|` from the Phase-1 task metric. It's
 correct as a statement about the **structural** quality of the alignment,
 but it discards information about orientation.
 
-## Result 2: C2's feature term fixes it
+## Result 2: C2's feature term fixes the flip
 
 ![spearman](../figures/spearman_bar.png)
 
-At N=400, K=500, both `torchgw-fused` and `pot-fused` give +0.999 Spearman
-with `alpha = 0.5` / `fgw_alpha = 0.5` balancing the W and GW terms.
+Right column, middle row: with the θ feature, FGW at N=10,000 stays on
+the forward match (+0.9999) — the N=10k result now looks identical to
+the N=400 result. At N=400 both `torchgw-fused` and `pot-fused` give
++0.999.
+
+| Solver              | Spearman (signed) | Wall  |
+|---------------------|------------------:|------:|
+| `torchgw-fused`     | **+0.9997**       | 5.43s |
+| `pot-fused`         | **+0.9996**       | 2.17s |
 
 | Solver              | Spearman (signed) | Wall  |
 |---------------------|------------------:|------:|
