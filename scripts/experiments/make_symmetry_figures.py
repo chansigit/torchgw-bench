@@ -69,6 +69,52 @@ def _apply_3d_view(ax) -> None:
         pass  # older matplotlib; fall back to default cube
 
 
+def _add_correspondence_lines(
+    fig, ax2d, ax3d,
+    src_xy: np.ndarray, tgt_xyz_display: np.ndarray,
+    src_s: np.ndarray, tgt_s: np.ndarray,
+    n_lines: int = 12, cmap_name: str = DATA_CMAP,
+    alpha: float = 0.6, linewidth: float = 1.2,
+) -> None:
+    """Draw `n_lines` across-panel lines connecting source points and their
+    parameter-matched target points. Coloured by the shared parameter.
+
+    tgt_xyz_display must already be in the (x, y, z) order used by the 3D
+    scatter call (i.e. for a swiss roll plotted as scatter(Y[:,0], Y[:,2],
+    Y[:,1]), pass np.stack((Y[:,0], Y[:,2], Y[:,1]), axis=1)).
+    """
+    from matplotlib.patches import ConnectionPatch
+    from mpl_toolkits.mplot3d import proj3d
+    import matplotlib.colors as mcolors
+
+    # Force the 3D projection matrix to be current so proj_transform is valid.
+    fig.canvas.draw()
+
+    s_min = float(min(src_s.min(), tgt_s.min()))
+    s_max = float(max(src_s.max(), tgt_s.max()))
+    # Anchor values evenly spanning the parameter range, avoiding the very ends
+    anchors = np.linspace(s_min, s_max, n_lines + 2)[1:-1]
+    cmap = plt.get_cmap(cmap_name)
+    norm = mcolors.Normalize(vmin=s_min, vmax=s_max)
+
+    for s in anchors:
+        i = int(np.argmin(np.abs(src_s - s)))
+        j = int(np.argmin(np.abs(tgt_s - s)))
+        x2, y2 = float(src_xy[i, 0]), float(src_xy[i, 1])
+        xyz = tgt_xyz_display[j]
+        x3p, y3p, _ = proj3d.proj_transform(
+            float(xyz[0]), float(xyz[1]), float(xyz[2]), ax3d.get_proj(),
+        )
+        con = ConnectionPatch(
+            xyA=(x2, y2), coordsA=ax2d.transData,
+            xyB=(x3p, y3p), coordsB=ax3d.transData,
+            color=cmap(norm(s)), alpha=alpha, linewidth=linewidth,
+            zorder=5,
+        )
+        con.set_clip_on(False)  # allow line to cross axes boundaries
+        fig.add_artist(con)
+
+
 def _get_rho(x: np.ndarray, y: np.ndarray) -> float:
     from scipy.stats import spearmanr
     r = spearmanr(x, y)
@@ -97,26 +143,30 @@ def make_datasets_figure() -> Path:
     fig = plt.figure(figsize=(14, 10))
     gs = GridSpec(2, 2, figure=fig, wspace=0.18, hspace=0.22)
 
-    # (0, 0) C1 / C2 source — 2D spiral
-    ax = fig.add_subplot(gs[0, 0])
-    sc = ax.scatter(X1[:, 0], X1[:, 1], c=a1, cmap=DATA_CMAP, s=14,
-                    vmin=0, vmax=9)
-    ax.set_title("C1 / C2 source — simple spiral (2D)", fontsize=TITLE_SIZE)
-    ax.set_xlabel("x"); ax.set_ylabel("y")
-    ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
-    ax.set_aspect("equal")
-    plt.colorbar(sc, ax=ax, shrink=0.78, label="θ (rad)")
+    # (0, 0) C1 / C2 source — 2D spiral. No colorbar here; we share one
+    # colorbar per row (placed on the 3D panel's right) so the space between
+    # the 2D and 3D panels stays clear for correspondence lines.
+    ax_c12_src = fig.add_subplot(gs[0, 0])
+    ax_c12_src.scatter(X1[:, 0], X1[:, 1], c=a1, cmap=DATA_CMAP, s=14,
+                        vmin=0, vmax=9)
+    ax_c12_src.set_title("C1 / C2 source — simple spiral (2D)",
+                          fontsize=TITLE_SIZE)
+    ax_c12_src.set_xlabel("x"); ax_c12_src.set_ylabel("y")
+    ax_c12_src.set_xlim(-XY_LIM, XY_LIM); ax_c12_src.set_ylim(-XY_LIM, XY_LIM)
+    ax_c12_src.set_aspect("equal")
 
     # (0, 1) C1 / C2 target — 3D Swiss roll
-    ax = fig.add_subplot(gs[0, 1], projection="3d")
-    sc = ax.scatter(Y1[:, 0], Y1[:, 2], Y1[:, 1], c=b1, cmap=DATA_CMAP, s=12,
-                    vmin=0, vmax=9)
-    ax.set_title("C1 / C2 target — simple Swiss roll (3D)",
-                  fontsize=TITLE_SIZE)
-    ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
-    ax.set_zlim(0, 1.0)  # z is uniform in [0, 1]
-    _apply_3d_view(ax)
-    plt.colorbar(sc, ax=ax, shrink=0.7, label="θ (rad)", pad=0.08)
+    ax_c12_tgt = fig.add_subplot(gs[0, 1], projection="3d")
+    Y1_display = np.stack((Y1[:, 0], Y1[:, 2], Y1[:, 1]), axis=1)
+    sc = ax_c12_tgt.scatter(Y1_display[:, 0], Y1_display[:, 1],
+                              Y1_display[:, 2], c=b1, cmap=DATA_CMAP, s=12,
+                              vmin=0, vmax=9)
+    ax_c12_tgt.set_title("C1 / C2 target — simple Swiss roll (3D)",
+                          fontsize=TITLE_SIZE)
+    ax_c12_tgt.set_xlim(-XY_LIM, XY_LIM); ax_c12_tgt.set_ylim(-XY_LIM, XY_LIM)
+    ax_c12_tgt.set_zlim(0, 1.0)  # z is uniform in [0, 1]
+    _apply_3d_view(ax_c12_tgt)
+    plt.colorbar(sc, ax=ax_c12_tgt, shrink=0.7, label="θ (rad)", pad=0.08)
 
     # Backbone-vs-tail masks (label 0 = main + long tail, label 1 = short tail).
     # The split between main spiral and long tail happens at the spiral's own
@@ -129,42 +179,53 @@ def make_datasets_figure() -> Path:
     tgt_long = (L3t == 0) & (b3 > fork_s + 1e-6)
     tgt_short = (L3t == 1)
 
-    # (1, 0) C3 source — 2D Y-fork spiral, three categories distinguished by
-    # marker shape (all three carry the same arclen colour).
-    ax = fig.add_subplot(gs[1, 0])
-    sc = ax.scatter(X3[src_main, 0], X3[src_main, 1], c=a3[src_main],
-                    cmap=DATA_CMAP, s=14, vmin=0, vmax=arclen_max,
-                    marker="o", label="main spiral")
-    ax.scatter(X3[src_long, 0], X3[src_long, 1], c=a3[src_long],
-               cmap=DATA_CMAP, s=28, vmin=0, vmax=arclen_max,
-               marker="^", label="long tail")
-    ax.scatter(X3[src_short, 0], X3[src_short, 1], c=a3[src_short],
-               cmap=DATA_CMAP, s=28, vmin=0, vmax=arclen_max,
-               marker="s", label="short tail")
-    ax.set_title("C3 source — spiral + Y-fork (2D)", fontsize=TITLE_SIZE)
-    ax.set_xlabel("x"); ax.set_ylabel("y")
-    ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
-    ax.set_aspect("equal")
-    ax.legend(loc="lower left", fontsize=9)
-    plt.colorbar(sc, ax=ax, shrink=0.78, label="geodesic arclen")
+    # (1, 0) C3 source — 2D Y-fork spiral. No colorbar (shared with 3D panel).
+    ax_c3_src = fig.add_subplot(gs[1, 0])
+    ax_c3_src.scatter(X3[src_main, 0], X3[src_main, 1], c=a3[src_main],
+                       cmap=DATA_CMAP, s=14, vmin=0, vmax=arclen_max,
+                       marker="o", label="main spiral")
+    ax_c3_src.scatter(X3[src_long, 0], X3[src_long, 1], c=a3[src_long],
+                       cmap=DATA_CMAP, s=28, vmin=0, vmax=arclen_max,
+                       marker="^", label="long tail")
+    ax_c3_src.scatter(X3[src_short, 0], X3[src_short, 1], c=a3[src_short],
+                       cmap=DATA_CMAP, s=28, vmin=0, vmax=arclen_max,
+                       marker="s", label="short tail")
+    ax_c3_src.set_title("C3 source — spiral + Y-fork (2D)",
+                         fontsize=TITLE_SIZE)
+    ax_c3_src.set_xlabel("x"); ax_c3_src.set_ylabel("y")
+    ax_c3_src.set_xlim(-XY_LIM, XY_LIM); ax_c3_src.set_ylim(-XY_LIM, XY_LIM)
+    ax_c3_src.set_aspect("equal")
+    ax_c3_src.legend(loc="lower left", fontsize=9)
 
     # (1, 1) C3 target — 3D Y-fork Swiss roll
-    ax = fig.add_subplot(gs[1, 1], projection="3d")
-    sc = ax.scatter(Y3[tgt_main, 0], Y3[tgt_main, 2], Y3[tgt_main, 1],
-                    c=b3[tgt_main], cmap=DATA_CMAP, s=12,
-                    vmin=0, vmax=arclen_max, marker="o", label="main spiral")
-    ax.scatter(Y3[tgt_long, 0], Y3[tgt_long, 2], Y3[tgt_long, 1],
-               c=b3[tgt_long], cmap=DATA_CMAP, s=22,
-               vmin=0, vmax=arclen_max, marker="^", label="long tail")
-    ax.scatter(Y3[tgt_short, 0], Y3[tgt_short, 2], Y3[tgt_short, 1],
-               c=b3[tgt_short], cmap=DATA_CMAP, s=22,
-               vmin=0, vmax=arclen_max, marker="s", label="short tail")
-    ax.set_title("C3 target — Swiss roll + Y-fork (3D)", fontsize=TITLE_SIZE)
-    ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
-    ax.set_zlim(0, 1.0)
-    _apply_3d_view(ax)
-    ax.legend(loc="upper right", fontsize=8)
-    plt.colorbar(sc, ax=ax, shrink=0.7, label="geodesic arclen", pad=0.08)
+    ax_c3_tgt = fig.add_subplot(gs[1, 1], projection="3d")
+    Y3_display = np.stack((Y3[:, 0], Y3[:, 2], Y3[:, 1]), axis=1)
+    sc = ax_c3_tgt.scatter(Y3_display[tgt_main, 0], Y3_display[tgt_main, 1],
+                             Y3_display[tgt_main, 2], c=b3[tgt_main],
+                             cmap=DATA_CMAP, s=12, vmin=0, vmax=arclen_max,
+                             marker="o", label="main spiral")
+    ax_c3_tgt.scatter(Y3_display[tgt_long, 0], Y3_display[tgt_long, 1],
+                       Y3_display[tgt_long, 2], c=b3[tgt_long],
+                       cmap=DATA_CMAP, s=22, vmin=0, vmax=arclen_max,
+                       marker="^", label="long tail")
+    ax_c3_tgt.scatter(Y3_display[tgt_short, 0], Y3_display[tgt_short, 1],
+                       Y3_display[tgt_short, 2], c=b3[tgt_short],
+                       cmap=DATA_CMAP, s=22, vmin=0, vmax=arclen_max,
+                       marker="s", label="short tail")
+    ax_c3_tgt.set_title("C3 target — Swiss roll + Y-fork (3D)",
+                         fontsize=TITLE_SIZE)
+    ax_c3_tgt.set_xlim(-XY_LIM, XY_LIM); ax_c3_tgt.set_ylim(-XY_LIM, XY_LIM)
+    ax_c3_tgt.set_zlim(0, 1.0)
+    _apply_3d_view(ax_c3_tgt)
+    ax_c3_tgt.legend(loc="upper right", fontsize=8)
+    plt.colorbar(sc, ax=ax_c3_tgt, shrink=0.7, label="geodesic arclen",
+                  pad=0.08)
+
+    # Ground-truth correspondence lines (same parameter → matching target).
+    _add_correspondence_lines(fig, ax_c12_src, ax_c12_tgt,
+                                X1, Y1_display, a1, b1, n_lines=12)
+    _add_correspondence_lines(fig, ax_c3_src, ax_c3_tgt,
+                                X3, Y3_display, a3, b3, n_lines=12)
 
     fig.suptitle("Datasets — each point coloured by its natural 1D parameter "
                   "(θ for the simple spiral, geodesic arclen for the Y-fork)",
