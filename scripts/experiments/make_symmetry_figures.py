@@ -160,10 +160,12 @@ def _add_bundled_lines(
 def _draw_schematic(ax) -> None:
     """Schematic of the 3D-source → 2D-target Y-fork alignment task.
 
-    Renders the experiment design (manifolds, regions, matching algorithm,
-    metric) as a labelled flow on the supplied axes. The same drawing is
-    used standalone (saved as schematic.svg) and as the top-left panel of
-    datasets.png.
+    The 3D source is drawn as a stacked "ribbon" (bottom + top spirals
+    connected by vertical sticks) so it visually reads as 3D. The 2D
+    target is drawn as a single flat curve. The three regions (main
+    spiral / long tail / short tail) are colour-coded the same way the
+    cluster legend is, so the same colour means the same region in every
+    place it appears.
     """
     import matplotlib.patches as mpatches
 
@@ -177,8 +179,46 @@ def _draw_schematic(ax) -> None:
     ax.text(0.5, 0.90, "Asymmetric Y-fork alignment   (3D → 2D)",
             ha="center", va="top", fontsize=10, style="italic", color="#444")
 
-    # --- Source (3D) sketch ---------------------------------------------
-    # Box
+    # Region palette — same hues as the cluster legend below
+    COLOR_MAIN = "#3b528b"   # viridis-low (spiral backbone)
+    COLOR_LONG = "#5dc863"   # viridis-mid (long tail)
+    COLOR_SHORT = "#fde725"  # viridis-high (short tail)
+
+    # --- Geometry of the mini Y-fork (shared between 3D and 2D sketch) --
+    theta_main = np.linspace(0.5, 5.4, 80)
+    r_main = 0.018 + 0.022 * theta_main / 5.4
+    # Main spiral, end point and tangent
+    end_phi = theta_main[-1]
+    end_offset = np.array([r_main[-1] * np.cos(end_phi),
+                            r_main[-1] * np.sin(end_phi)])
+    tang_dir = np.array([np.cos(end_phi) * (0.022 / 5.4)
+                          - r_main[-1] * np.sin(end_phi),
+                          np.sin(end_phi) * (0.022 / 5.4)
+                          + r_main[-1] * np.cos(end_phi)])
+    tang_dir = tang_dir / (np.linalg.norm(tang_dir) + 1e-9)
+    rad_dir = np.array([np.cos(end_phi), np.sin(end_phi)])
+    cross = tang_dir[0] * rad_dir[1] - tang_dir[1] * rad_dir[0]
+    sign = -1.0 if cross > 0 else 1.0
+    fork_angle = sign * np.pi / 6
+    short_dir = np.array([
+        tang_dir[0] * np.cos(fork_angle) - tang_dir[1] * np.sin(fork_angle),
+        tang_dir[0] * np.sin(fork_angle) + tang_dir[1] * np.cos(fork_angle),
+    ])
+    s_long = np.linspace(0, 0.045, 12)
+    s_short = np.linspace(0, 0.022, 8)
+
+    def _layout_curves(cx: float, cy: float):
+        sx_m = cx + r_main * np.cos(theta_main)
+        sy_m = cy + r_main * np.sin(theta_main)
+        end_x = cx + end_offset[0]
+        end_y = cy + end_offset[1]
+        sx_l = end_x + s_long * tang_dir[0]
+        sy_l = end_y + s_long * tang_dir[1]
+        sx_s = end_x + s_short * short_dir[0]
+        sy_s = end_y + s_short * short_dir[1]
+        return sx_m, sy_m, sx_l, sy_l, sx_s, sy_s
+
+    # --- 3D source box (left) -------------------------------------------
     src = mpatches.FancyBboxPatch(
         (0.04, 0.42), 0.36, 0.36,
         boxstyle="round,pad=0.015,rounding_size=0.025",
@@ -189,32 +229,41 @@ def _draw_schematic(ax) -> None:
             fontsize=11, fontweight="bold", color="#1f4e79")
     ax.text(0.22, 0.69, "Y-fork Swiss roll", ha="center", va="top",
             fontsize=9, color="#1f4e79")
-    # Mini swiss-roll sketch inside the box (top-down spiral with z extrusion)
-    theta_s = np.linspace(0.5, 6.2, 80)
-    r_s = 0.018 + 0.025 * theta_s / 6.2
-    cx, cy = 0.18, 0.55
-    sx = cx + r_s * np.cos(theta_s)
-    sy = cy + r_s * np.sin(theta_s)
-    ax.plot(sx, sy, color="#1f4e79", linewidth=1.0, alpha=0.85)
-    # Stylised long/short tails
-    end = (sx[-1], sy[-1])
-    tang = np.array([sx[-1] - sx[-3], sy[-1] - sy[-3]])
-    tang = tang / (np.linalg.norm(tang) + 1e-9)
-    rad = np.array([np.cos(theta_s[-1]), np.sin(theta_s[-1])])
-    long_end = (end[0] + 0.045 * tang[0], end[1] + 0.045 * tang[1])
-    short_dir = 0.7 * tang + 0.7 * rad
-    short_dir /= np.linalg.norm(short_dir)
-    short_end = (end[0] + 0.025 * short_dir[0], end[1] + 0.025 * short_dir[1])
-    ax.plot([end[0], long_end[0]], [end[1], long_end[1]],
-            color="#1f4e79", linewidth=1.4)
-    ax.plot([end[0], short_end[0]], [end[1], short_end[1]],
-            color="#1f4e79", linewidth=1.4)
-    ax.text(0.36, 0.55, "z", ha="center", fontsize=8, color="#1f4e79",
-            style="italic")
-    ax.text(0.22, 0.45, "N = 4000", ha="center", va="top",
-            fontsize=9, style="italic", color="#1f4e79")
 
-    # --- Target (2D) sketch ---------------------------------------------
+    cx, cy = 0.18, 0.55
+    sx_m, sy_m, sx_l, sy_l, sx_s, sy_s = _layout_curves(cx, cy)
+    # 3D illusion: skew the "top layer" up-right and connect with sticks
+    dx, dy = 0.005, 0.038
+    sx_m_t, sy_m_t = sx_m + dx, sy_m + dy
+    sx_l_t, sy_l_t = sx_l + dx, sy_l + dy
+    sx_s_t, sy_s_t = sx_s + dx, sy_s + dy
+    # Bottom curves (solid)
+    ax.plot(sx_m, sy_m, color=COLOR_MAIN, lw=1.2, zorder=2)
+    ax.plot(sx_l, sy_l, color=COLOR_LONG, lw=1.6, zorder=2)
+    ax.plot(sx_s, sy_s, color=COLOR_SHORT, lw=1.6, zorder=2)
+    # Vertical sticks (semi-transparent) — sampled points
+    for arr_b, arr_t, arr_b_y, arr_t_y, color, idxs in (
+        (sx_m, sx_m_t, sy_m, sy_m_t, COLOR_MAIN,
+         np.linspace(0, len(sx_m) - 1, 9).astype(int)),
+        (sx_l, sx_l_t, sy_l, sy_l_t, COLOR_LONG, [0, 5, 11]),
+        (sx_s, sx_s_t, sy_s, sy_s_t, COLOR_SHORT, [0, 4, 7]),
+    ):
+        for i in idxs:
+            ax.plot([arr_b[i], arr_t[i]], [arr_b_y[i], arr_t_y[i]],
+                    color=color, lw=0.5, alpha=0.55, zorder=1)
+    # Top curves (lighter)
+    ax.plot(sx_m_t, sy_m_t, color=COLOR_MAIN, lw=1.0, alpha=0.65, zorder=2)
+    ax.plot(sx_l_t, sy_l_t, color=COLOR_LONG, lw=1.3, alpha=0.65, zorder=2)
+    ax.plot(sx_s_t, sy_s_t, color=COLOR_SHORT, lw=1.3, alpha=0.65, zorder=2)
+    # z arrow indicator
+    ax.annotate("", xy=(0.075, 0.605), xytext=(0.075, 0.495),
+                 arrowprops=dict(arrowstyle="->", lw=0.9, color="#666"))
+    ax.text(0.082, 0.55, "z", ha="left", va="center", fontsize=8,
+            color="#666", style="italic")
+    ax.text(0.22, 0.45, "N = 4000   (extruded along z)", ha="center",
+            va="top", fontsize=9, style="italic", color="#1f4e79")
+
+    # --- 2D target box (right) ------------------------------------------
     tgt = mpatches.FancyBboxPatch(
         (0.60, 0.42), 0.36, 0.36,
         boxstyle="round,pad=0.015,rounding_size=0.025",
@@ -225,23 +274,21 @@ def _draw_schematic(ax) -> None:
             fontsize=11, fontweight="bold", color="#a85d00")
     ax.text(0.78, 0.69, "Y-fork spiral", ha="center", va="top",
             fontsize=9, color="#a85d00")
+
     cx, cy = 0.74, 0.55
-    sx = cx + r_s * np.cos(theta_s)
-    sy = cy + r_s * np.sin(theta_s)
-    ax.plot(sx, sy, color="#a85d00", linewidth=1.0, alpha=0.85)
-    end = (sx[-1], sy[-1])
-    tang = np.array([sx[-1] - sx[-3], sy[-1] - sy[-3]])
-    tang = tang / (np.linalg.norm(tang) + 1e-9)
-    rad = np.array([np.cos(theta_s[-1]), np.sin(theta_s[-1])])
-    long_end = (end[0] + 0.045 * tang[0], end[1] + 0.045 * tang[1])
-    short_dir = 0.7 * tang + 0.7 * rad
-    short_dir /= np.linalg.norm(short_dir)
-    short_end = (end[0] + 0.025 * short_dir[0], end[1] + 0.025 * short_dir[1])
-    ax.plot([end[0], long_end[0]], [end[1], long_end[1]],
-            color="#a85d00", linewidth=1.4)
-    ax.plot([end[0], short_end[0]], [end[1], short_end[1]],
-            color="#a85d00", linewidth=1.4)
-    ax.text(0.78, 0.45, "K = 5000", ha="center", va="top",
+    sx_m2, sy_m2, sx_l2, sy_l2, sx_s2, sy_s2 = _layout_curves(cx, cy)
+    # Single flat curves — no extrusion
+    ax.plot(sx_m2, sy_m2, color=COLOR_MAIN, lw=1.5)
+    ax.plot(sx_l2, sy_l2, color=COLOR_LONG, lw=1.8)
+    ax.plot(sx_s2, sy_s2, color=COLOR_SHORT, lw=1.8)
+    # Tiny x/y axes inside the box to emphasise flatness
+    ax.annotate("", xy=(0.66, 0.46), xytext=(0.625, 0.46),
+                 arrowprops=dict(arrowstyle="->", lw=0.7, color="#888"))
+    ax.annotate("", xy=(0.625, 0.495), xytext=(0.625, 0.46),
+                 arrowprops=dict(arrowstyle="->", lw=0.7, color="#888"))
+    ax.text(0.665, 0.452, "x", fontsize=7, color="#888", style="italic")
+    ax.text(0.617, 0.495, "y", fontsize=7, color="#888", style="italic")
+    ax.text(0.78, 0.45, "K = 5000   (flat)", ha="center", va="top",
             fontsize=9, style="italic", color="#a85d00")
 
     # --- Algorithm arrow -------------------------------------------------
@@ -252,18 +299,18 @@ def _draw_schematic(ax) -> None:
     ax.text(0.50, 0.555, "(arclen feature)", ha="center", fontsize=8,
             style="italic", color="#444")
 
-    # --- Region legend ---------------------------------------------------
-    ax.text(0.5, 0.34, "Per-cluster panels (this figure)",
+    # --- Region legend (same colours as the 3D / 2D mini sketches) ------
+    ax.text(0.5, 0.34, "Regions (same colour = same region everywhere)",
             ha="center", fontsize=10, fontweight="bold")
-    ax.scatter(0.10, 0.27, marker="o", s=55, c="#3b528b",
+    ax.scatter(0.10, 0.27, marker="o", s=55, c=COLOR_MAIN,
                 edgecolors="black", linewidths=0.6)
     ax.text(0.13, 0.27, "spiral inner / middle / outer  (backbone, label 0)",
             va="center", fontsize=9)
-    ax.scatter(0.10, 0.20, marker="^", s=70, c="#5dc863",
+    ax.scatter(0.10, 0.20, marker="^", s=70, c=COLOR_LONG,
                 edgecolors="black", linewidths=0.6)
     ax.text(0.13, 0.20, "long tail  (tangent extension, label 0)",
             va="center", fontsize=9)
-    ax.scatter(0.10, 0.13, marker="s", s=65, c="#fde725",
+    ax.scatter(0.10, 0.13, marker="s", s=65, c=COLOR_SHORT,
                 edgecolors="black", linewidths=0.6)
     ax.text(0.13, 0.13, "short tail  (off-axis branch, label 1)",
             va="center", fontsize=9)
