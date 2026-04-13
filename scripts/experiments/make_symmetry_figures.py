@@ -43,7 +43,7 @@ XY_LIM = 1.8
 TITLE_SIZE = 12
 FIG_DPI = 130
 VIEW_3D = dict(elev=30, azim=-60)
-BOX_ASPECT_3D = (1.6, 1.6, 1.0)
+BOX_ASPECT_3D = (1.5, 1.5, 1.4)  # taller z so the swiss roll has presence
 SURFACE_ALPHA = 0.35  # opaque enough to read the swirl through the scatter
 TAIL_STRIP_ALPHA = 0.30
 
@@ -157,6 +157,122 @@ def _add_bundled_lines(
             fig.add_artist(con)
 
 
+def _draw_schematic(ax) -> None:
+    """Schematic of the 3D-source → 2D-target Y-fork alignment task.
+
+    Renders the experiment design (manifolds, regions, matching algorithm,
+    metric) as a labelled flow on the supplied axes. The same drawing is
+    used standalone (saved as schematic.svg) and as the top-left panel of
+    datasets.png.
+    """
+    import matplotlib.patches as mpatches
+
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_aspect("equal", adjustable="box")
+    ax.axis("off")
+
+    # --- Title bar -------------------------------------------------------
+    ax.text(0.5, 0.97, "Experiment design", ha="center", va="top",
+            fontsize=14, fontweight="bold")
+    ax.text(0.5, 0.90, "Asymmetric Y-fork alignment   (3D → 2D)",
+            ha="center", va="top", fontsize=10, style="italic", color="#444")
+
+    # --- Source (3D) sketch ---------------------------------------------
+    # Box
+    src = mpatches.FancyBboxPatch(
+        (0.04, 0.42), 0.36, 0.36,
+        boxstyle="round,pad=0.015,rounding_size=0.025",
+        edgecolor="#1f4e79", facecolor="#e7f0fa", linewidth=1.5,
+    )
+    ax.add_patch(src)
+    ax.text(0.22, 0.74, "3D source", ha="center", va="top",
+            fontsize=11, fontweight="bold", color="#1f4e79")
+    ax.text(0.22, 0.69, "Y-fork Swiss roll", ha="center", va="top",
+            fontsize=9, color="#1f4e79")
+    # Mini swiss-roll sketch inside the box (top-down spiral with z extrusion)
+    theta_s = np.linspace(0.5, 6.2, 80)
+    r_s = 0.018 + 0.025 * theta_s / 6.2
+    cx, cy = 0.18, 0.55
+    sx = cx + r_s * np.cos(theta_s)
+    sy = cy + r_s * np.sin(theta_s)
+    ax.plot(sx, sy, color="#1f4e79", linewidth=1.0, alpha=0.85)
+    # Stylised long/short tails
+    end = (sx[-1], sy[-1])
+    tang = np.array([sx[-1] - sx[-3], sy[-1] - sy[-3]])
+    tang = tang / (np.linalg.norm(tang) + 1e-9)
+    rad = np.array([np.cos(theta_s[-1]), np.sin(theta_s[-1])])
+    long_end = (end[0] + 0.045 * tang[0], end[1] + 0.045 * tang[1])
+    short_dir = 0.7 * tang + 0.7 * rad
+    short_dir /= np.linalg.norm(short_dir)
+    short_end = (end[0] + 0.025 * short_dir[0], end[1] + 0.025 * short_dir[1])
+    ax.plot([end[0], long_end[0]], [end[1], long_end[1]],
+            color="#1f4e79", linewidth=1.4)
+    ax.plot([end[0], short_end[0]], [end[1], short_end[1]],
+            color="#1f4e79", linewidth=1.4)
+    ax.text(0.36, 0.55, "z", ha="center", fontsize=8, color="#1f4e79",
+            style="italic")
+    ax.text(0.22, 0.45, "N = 4000", ha="center", va="top",
+            fontsize=9, style="italic", color="#1f4e79")
+
+    # --- Target (2D) sketch ---------------------------------------------
+    tgt = mpatches.FancyBboxPatch(
+        (0.60, 0.42), 0.36, 0.36,
+        boxstyle="round,pad=0.015,rounding_size=0.025",
+        edgecolor="#a85d00", facecolor="#fff3e0", linewidth=1.5,
+    )
+    ax.add_patch(tgt)
+    ax.text(0.78, 0.74, "2D target", ha="center", va="top",
+            fontsize=11, fontweight="bold", color="#a85d00")
+    ax.text(0.78, 0.69, "Y-fork spiral", ha="center", va="top",
+            fontsize=9, color="#a85d00")
+    cx, cy = 0.74, 0.55
+    sx = cx + r_s * np.cos(theta_s)
+    sy = cy + r_s * np.sin(theta_s)
+    ax.plot(sx, sy, color="#a85d00", linewidth=1.0, alpha=0.85)
+    end = (sx[-1], sy[-1])
+    tang = np.array([sx[-1] - sx[-3], sy[-1] - sy[-3]])
+    tang = tang / (np.linalg.norm(tang) + 1e-9)
+    rad = np.array([np.cos(theta_s[-1]), np.sin(theta_s[-1])])
+    long_end = (end[0] + 0.045 * tang[0], end[1] + 0.045 * tang[1])
+    short_dir = 0.7 * tang + 0.7 * rad
+    short_dir /= np.linalg.norm(short_dir)
+    short_end = (end[0] + 0.025 * short_dir[0], end[1] + 0.025 * short_dir[1])
+    ax.plot([end[0], long_end[0]], [end[1], long_end[1]],
+            color="#a85d00", linewidth=1.4)
+    ax.plot([end[0], short_end[0]], [end[1], short_end[1]],
+            color="#a85d00", linewidth=1.4)
+    ax.text(0.78, 0.45, "K = 5000", ha="center", va="top",
+            fontsize=9, style="italic", color="#a85d00")
+
+    # --- Algorithm arrow -------------------------------------------------
+    ax.annotate("", xy=(0.60, 0.60), xytext=(0.40, 0.60),
+                arrowprops=dict(arrowstyle="->", lw=2.0, color="#222"))
+    ax.text(0.50, 0.66, "GW / FGW", ha="center", fontsize=10,
+            fontweight="bold")
+    ax.text(0.50, 0.555, "(arclen feature)", ha="center", fontsize=8,
+            style="italic", color="#444")
+
+    # --- Region legend ---------------------------------------------------
+    ax.text(0.5, 0.34, "Per-cluster panels (this figure)",
+            ha="center", fontsize=10, fontweight="bold")
+    ax.scatter(0.10, 0.27, marker="o", s=55, c="#3b528b",
+                edgecolors="black", linewidths=0.6)
+    ax.text(0.13, 0.27, "spiral inner / middle / outer  (backbone, label 0)",
+            va="center", fontsize=9)
+    ax.scatter(0.10, 0.20, marker="^", s=70, c="#5dc863",
+                edgecolors="black", linewidths=0.6)
+    ax.text(0.13, 0.20, "long tail  (tangent extension, label 0)",
+            va="center", fontsize=9)
+    ax.scatter(0.10, 0.13, marker="s", s=65, c="#fde725",
+                edgecolors="black", linewidths=0.6)
+    ax.text(0.13, 0.13, "short tail  (off-axis branch, label 1)",
+            va="center", fontsize=9)
+
+    ax.text(0.5, 0.04,
+            "Metric: signed Spearman ρ on geodesic arclen,  per region",
+            ha="center", fontsize=8, style="italic", color="#444")
+
+
 def _bundle_closest(
     src_s: np.ndarray, tgt_s: np.ndarray, anchor: float, n: int,
     src_mask: "np.ndarray | None" = None,
@@ -216,9 +332,13 @@ def make_datasets_figure() -> Path:
     ]
     n_per_cluster = 10
 
-    fig = plt.figure(figsize=(19, 11))
-    outer_gs = GridSpec(2, 3, figure=fig, wspace=0.13, hspace=0.18,
-                         left=0.03, right=0.93, top=0.92, bottom=0.05)
+    fig = plt.figure(figsize=(19, 14))
+    outer_gs = GridSpec(2, 3, figure=fig, wspace=0.13, hspace=0.20,
+                         left=0.03, right=0.93, top=0.93, bottom=0.04)
+
+    # Top-left cell: schematic of the experiment
+    ax_schematic = fig.add_subplot(outer_gs[0, 0])
+    _draw_schematic(ax_schematic)
 
     last_sc = None
     for (gs_row, gs_col, anchor, sm, tm, marker, label) in clusters_layout:
@@ -547,7 +667,22 @@ def make_c3_zoom_figure() -> Path:
     return out
 
 
+def make_schematic_files() -> "tuple[Path, Path]":
+    """Save the experiment schematic standalone in both SVG and PNG."""
+    out_svg = FIG_DIR / "schematic.svg"
+    out_png = FIG_DIR / "schematic.png"
+    for path, fmt in ((out_svg, "svg"), (out_png, "png")):
+        fig, ax = plt.subplots(figsize=(7, 5.4))
+        _draw_schematic(ax)
+        fig.savefig(path, format=fmt, bbox_inches="tight")
+        plt.close(fig)
+    return out_svg, out_png
+
+
 if __name__ == "__main__":
+    print("[fig] schematic.svg / .png ...")
+    p_svg, p_png = make_schematic_files()
+    print(f"  → {p_svg}\n  → {p_png}")
     print("[fig] datasets.png ...")
     print(f"  → {make_datasets_figure()}")
     print("[fig] solver_effects.png ...")
