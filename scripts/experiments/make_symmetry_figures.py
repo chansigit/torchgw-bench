@@ -52,6 +52,9 @@ MATCH_CMAP = "plasma"  # solver-effect panels — depicts the matched scalar
 XY_LIM = 1.8           # 2D axis limit; covers both simple spiral and Y-fork
 TITLE_SIZE = 12
 FIG_DPI = 130
+# 3D view: near-top-down so the spiral / Y-fork structure is legible.
+# (Old elev=20 made the swiss roll look like a tall wall of points.)
+VIEW_3D = dict(elev=80, azim=-60)
 
 
 def _get_rho(x: np.ndarray, y: np.ndarray) -> float:
@@ -100,19 +103,33 @@ def make_datasets_figure() -> Path:
                   fontsize=TITLE_SIZE)
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_zlim(0, 1.0)  # z is uniform in [0, 1]
-    ax.view_init(elev=20, azim=-60)
+    ax.view_init(**VIEW_3D)
     plt.colorbar(sc, ax=ax, shrink=0.7, label="θ (rad)", pad=0.08)
 
-    # (1, 0) C3 source — 2D Y-fork spiral
+    # Backbone-vs-tail masks (label 0 = main + long tail, label 1 = short tail).
+    # The split between main spiral and long tail happens at the spiral's own
+    # arc length at θ=9 (≈5.85 units).
+    fork_s = float(c3.spiral_arclen(9.0).item())
+    src_main = (L3 == 0) & (a3 <= fork_s + 1e-6)
+    src_long = (L3 == 0) & (a3 > fork_s + 1e-6)
+    src_short = (L3 == 1)
+    tgt_main = (L3t == 0) & (b3 <= fork_s + 1e-6)
+    tgt_long = (L3t == 0) & (b3 > fork_s + 1e-6)
+    tgt_short = (L3t == 1)
+
+    # (1, 0) C3 source — 2D Y-fork spiral, three categories distinguished by
+    # marker shape (all three carry the same arclen colour).
     ax = fig.add_subplot(gs[1, 0])
-    sc = ax.scatter(X3[:, 0], X3[:, 1], c=a3, cmap=DATA_CMAP, s=14,
-                    vmin=0, vmax=arclen_max)
-    # Tail-2 outline
-    ax.scatter(X3[L3 == 1, 0], X3[L3 == 1, 1], facecolors="none",
-               edgecolors="crimson", s=55, linewidths=1.4, marker="s",
-               label="tail 2 (label 1)")
-    ax.set_title("C3 source — spiral + Y-fork (2D)",
-                  fontsize=TITLE_SIZE)
+    sc = ax.scatter(X3[src_main, 0], X3[src_main, 1], c=a3[src_main],
+                    cmap=DATA_CMAP, s=14, vmin=0, vmax=arclen_max,
+                    marker="o", label="main spiral")
+    ax.scatter(X3[src_long, 0], X3[src_long, 1], c=a3[src_long],
+               cmap=DATA_CMAP, s=28, vmin=0, vmax=arclen_max,
+               marker="^", label="long tail")
+    ax.scatter(X3[src_short, 0], X3[src_short, 1], c=a3[src_short],
+               cmap=DATA_CMAP, s=28, vmin=0, vmax=arclen_max,
+               marker="s", label="short tail")
+    ax.set_title("C3 source — spiral + Y-fork (2D)", fontsize=TITLE_SIZE)
     ax.set_xlabel("x"); ax.set_ylabel("y")
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_aspect("equal")
@@ -121,16 +138,20 @@ def make_datasets_figure() -> Path:
 
     # (1, 1) C3 target — 3D Y-fork Swiss roll
     ax = fig.add_subplot(gs[1, 1], projection="3d")
-    sc = ax.scatter(Y3[:, 0], Y3[:, 2], Y3[:, 1], c=b3, cmap=DATA_CMAP, s=12,
-                    vmin=0, vmax=arclen_max)
-    ax.scatter(Y3[L3t == 1, 0], Y3[L3t == 1, 2], Y3[L3t == 1, 1],
-               facecolors="none", edgecolors="crimson", s=40, linewidths=1.3,
-               marker="s")
-    ax.set_title("C3 target — Swiss roll + Y-fork (3D)",
-                  fontsize=TITLE_SIZE)
+    sc = ax.scatter(Y3[tgt_main, 0], Y3[tgt_main, 2], Y3[tgt_main, 1],
+                    c=b3[tgt_main], cmap=DATA_CMAP, s=12,
+                    vmin=0, vmax=arclen_max, marker="o", label="main spiral")
+    ax.scatter(Y3[tgt_long, 0], Y3[tgt_long, 2], Y3[tgt_long, 1],
+               c=b3[tgt_long], cmap=DATA_CMAP, s=22,
+               vmin=0, vmax=arclen_max, marker="^", label="long tail")
+    ax.scatter(Y3[tgt_short, 0], Y3[tgt_short, 2], Y3[tgt_short, 1],
+               c=b3[tgt_short], cmap=DATA_CMAP, s=22,
+               vmin=0, vmax=arclen_max, marker="s", label="short tail")
+    ax.set_title("C3 target — Swiss roll + Y-fork (3D)", fontsize=TITLE_SIZE)
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_zlim(0, 1.0)
-    ax.view_init(elev=20, azim=-60)
+    ax.view_init(**VIEW_3D)
+    ax.legend(loc="upper right", fontsize=8)
     plt.colorbar(sc, ax=ax, shrink=0.7, label="geodesic arclen", pad=0.08)
 
     fig.suptitle("Datasets — each point coloured by its natural 1D parameter "
@@ -318,47 +339,48 @@ def make_c3_zoom_figure() -> Path:
 
     fork_s = float(c3.spiral_arclen(9.0).item())
     main_arc = (Ls == 0) & (a <= fork_s + 1e-6)
-    tail1 = (Ls == 0) & (a > fork_s + 1e-6)
-    tail2 = (Ls == 1)
+    long_t = (Ls == 0) & (a > fork_s + 1e-6)
+    short_t = (Ls == 1)
     main_arc_t = (Lt == 0) & (b <= fork_s + 1e-6)
-    tail1_t = (Lt == 0) & (b > fork_s + 1e-6)
-    tail2_t = (Lt == 1)
+    long_t_tgt = (Lt == 0) & (b > fork_s + 1e-6)
+    short_t_tgt = (Lt == 1)
 
     fig = plt.figure(figsize=(16, 5))
 
     ax = fig.add_subplot(1, 4, 1)
     ax.scatter(X[main_arc, 0], X[main_arc, 1], c="steelblue", s=12,
-               label="main spiral (label 0)")
-    ax.scatter(X[tail1, 0], X[tail1, 1], c="mediumseagreen", s=14,
-               label="tail 1 tangent (label 0)")
-    ax.scatter(X[tail2, 0], X[tail2, 1], c="crimson", s=18, marker="s",
-               label="tail 2 +30° (label 1)")
-    ax.set_title("C3 source (2D): asymmetric Y\ntail 1 long, tail 2 short + off-axis")
+               label="main spiral")
+    ax.scatter(X[long_t, 0], X[long_t, 1], c="mediumseagreen", s=18,
+               marker="^", label="long tail")
+    ax.scatter(X[short_t, 0], X[short_t, 1], c="crimson", s=18, marker="s",
+               label="short tail")
+    ax.set_title("C3 source (2D): asymmetric Y-fork")
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_aspect("equal")
-    ax.legend(loc="lower left", fontsize=8)
+    ax.legend(loc="lower left", fontsize=9)
 
     ax = fig.add_subplot(1, 4, 2, projection="3d")
     ax.scatter(Y[main_arc_t, 0], Y[main_arc_t, 2], Y[main_arc_t, 1],
-               c="steelblue", s=10, label="main")
-    ax.scatter(Y[tail1_t, 0], Y[tail1_t, 2], Y[tail1_t, 1],
-               c="mediumseagreen", s=12, label="tail 1")
-    ax.scatter(Y[tail2_t, 0], Y[tail2_t, 2], Y[tail2_t, 1],
-               c="crimson", s=14, marker="s", label="tail 2")
+               c="steelblue", s=10, label="main spiral")
+    ax.scatter(Y[long_t_tgt, 0], Y[long_t_tgt, 2], Y[long_t_tgt, 1],
+               c="mediumseagreen", s=14, marker="^", label="long tail")
+    ax.scatter(Y[short_t_tgt, 0], Y[short_t_tgt, 2], Y[short_t_tgt, 1],
+               c="crimson", s=14, marker="s", label="short tail")
     ax.set_xlim(-XY_LIM, XY_LIM); ax.set_ylim(-XY_LIM, XY_LIM)
     ax.set_zlim(0, 1.0)
     ax.set_title("C3 target (3D)")
-    ax.view_init(elev=20, azim=-60)
+    ax.view_init(**VIEW_3D)
     ax.legend(loc="upper right", fontsize=8)
 
     ax = fig.add_subplot(1, 4, 3)
     vmax = float(b.max())
-    sc = ax.scatter(X[Ls == 0, 0], X[Ls == 0, 1],
-                     c=matched_scalar[Ls == 0], cmap=MATCH_CMAP,
-                     s=14, vmin=0, vmax=vmax)
-    ax.scatter(X[tail2, 0], X[tail2, 1], c=matched_scalar[tail2],
-               cmap=MATCH_CMAP, vmin=0, vmax=vmax, s=18, marker="s",
-               edgecolors="crimson", linewidths=1.2)
+    sc = ax.scatter(X[main_arc, 0], X[main_arc, 1],
+                     c=matched_scalar[main_arc], cmap=MATCH_CMAP,
+                     s=14, vmin=0, vmax=vmax, marker="o")
+    ax.scatter(X[long_t, 0], X[long_t, 1], c=matched_scalar[long_t],
+               cmap=MATCH_CMAP, vmin=0, vmax=vmax, s=22, marker="^")
+    ax.scatter(X[short_t, 0], X[short_t, 1], c=matched_scalar[short_t],
+               cmap=MATCH_CMAP, vmin=0, vmax=vmax, s=22, marker="s")
     ax.set_title(f"matched target arclen (FGW)\n"
                   f"main-Spearman = {rho_main:+.4f}\n"
                   f"tail-Spearman = {rho_tail:+.4f}")
