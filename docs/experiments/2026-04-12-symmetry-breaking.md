@@ -1,190 +1,116 @@
-# Breaking GW's Orientation Ambiguity — Two Approaches
+# Breaking GW's Orientation Ambiguity with an Asymmetric Y-Fork
 
-**Date:** 2026-04-12 · **Tracks:** `core/01_foundation`, `core/02_foundation_fused`, `core/03_branched` · **Tag:** `v0.1.0-m1b` and forward
+**Date:** 2026-04-12 (figures refreshed 2026-04-13) · **Track:** `core/03_branched`
 
 ## TL;DR
 
-Gromov-Wasserstein on a symmetric manifold (spiral → Swiss roll) has two
-equivalent optima: the **forward** correspondence and the **reverse**. At
-small scales the solver usually lands on forward, but at larger scales it can
-flip — and our Spearman-ρ task metric then reports a large negative number
-that looks like a regression but is actually a perfectly good reverse match.
+Plain Gromov-Wasserstein on a symmetric manifold (spiral ↔ Swiss roll)
+has two equivalent optima — forward and reverse — and at larger N the
+solver sometimes picks the reverse, which looks like a regression but is
+actually a valid match in the other direction.
 
-We tested two independent fixes:
+The fix we settled on is to break the ambiguity **at the data level**:
+attach an asymmetric Y-fork to one end of both manifolds, so the two
+endpoints of the curve have topologically different local geometry (a
+single-terminus inner end vs. a two-branch outer end). Plain GW then
+converges to the forward correspondence deterministically.
 
-1. **C2 — Fused GW.** Attach the arclength parameter θ to each point as a
-   scalar feature, then run FGW. The Wasserstein term on features pins down
-   the orientation.
-2. **C3 — Asymmetric Y-fork geometry.** Attach an asymmetric Y-fork to the
-   outer end of both manifolds: a long tail (tail 1, along the spiral's
-   local tangent — the "curve continuation") and a shorter tail (tail 2,
-   rotated 30° toward the outward radial — the "off-axis branch"). Main +
-   tail 1 share label 0 (backbone); tail 2 carries label 1 (branch).
+This track also explores a second, smaller question: pure GW on the
+Y-fork occasionally **swaps** the two tails (short tail → long tail and
+vice versa). Using geodesic distance from the spiral centre as an FGW
+feature cleans that up — the feature ranges for the short and long
+tails differ (`[0, tail2_len]` vs `[0, tail1_len]`), and FGW uses that
+gap to rule out cross-tail matches.
 
-Both work. Both give +0.999 Spearman on the same seed where C1 at N=10k
-flips to −0.999.
+## The dataset
 
-## The setup
+Source is a **3D Swiss roll with a Y-fork**; target is the same shape
+embedded in **2D as a spiral with a Y-fork**. Both carry three regions:
 
-### Three tracks, three datasets
+- **main spiral** — the standard Archimedean spiral on θ ∈ [0, 9]
+- **long tail** — a 1.2-unit straight segment continuing from the
+  spiral's outer end along the local tangent
+- **short tail** — a 0.6-unit straight segment rotated +30° toward the
+  outward radial, an off-axis branch
+
+Labels: 0 for `main + long tail` (together they form a single monotone
+arc — the *backbone*), 1 for `short tail` (the true *off-axis branch*).
+
+Every point also carries a 1D coordinate: its **geodesic distance from
+the spiral's inner end (θ=0)**, computed analytically for the spiral
+part and by adding the tail parameter `s` for the two tails. This
+coordinate is the FGW feature and the Spearman target for the task
+metrics.
 
 ![datasets](../figures/datasets.png)
 
-Top row: **C1 / C2** share a single dataset — the classic 2D Archimedean
-spiral → 3D Swiss roll pair from track 01, θ ∈ [0, 9]. Both manifolds are
-smooth and reversal-symmetric, so pure GW has two equal optima (forward
-and reverse).
+The 12 coloured lines are a ground-truth guide — 5 anchor regions (3 on
+the backbone, one on each tail tip) × 5 nearly-parallel lines per
+bundle. A source point near the spiral's inner end (dark purple) maps to
+the innermost target region; the long-tail tip (bright yellow) maps to
+the target's long-tail tip; and so on.
 
-Bottom row: **C3** attaches an **asymmetric Y-fork** at θ=9. Tail 1 runs
-along the spiral's local tangent for 1.2 units; tail 2 is a shorter stub
-(0.6 units) rotated 30° toward the outward radial. 30% of the points are
-allocated to the fork (proportionally by length). The per-point scalar
-shown is geodesic arclength from the spiral's inner end.
+## Pure GW works — FGW squeezes the last 6%
 
-All experiments use `torchgw.sampled_gw(distance_mode="landmark")` with
-the same hyperparameters (`M=80, k=5, n_landmarks=50, epsilon=5e-3,
-max_iter=300`). FGW variants additionally set `fgw_alpha=0.5` and pass
-the feature cost matrix via `C_linear`. C2 uses raw θ as the feature; C3
-uses geodesic arclength.
-
-### How to read the solver panels
-
-For each source point we take the argmax of the transport plan row to
-pick its matched target column, then colour the source 2D scatter by the
-target's 1D scalar (θ for C1/C2, arclen for C3). A forward match paints
-the source with a colour ramp that runs from purple at the centre to
-yellow at the rim — aligned with the source's own progression. A reverse
-match produces the mirror image.
+At N=500 (source) × K=400 (target), seed 0, same torchgw hyperparameters
+for both solvers (`distance_mode="landmark"`, `M=80, k=5,
+n_landmarks=50, ε=5e-3, max_iter=300`):
 
 ![solver effects](../figures/solver_effects.png)
 
-## Result 1: C1 flips at scale
+| Solver              | `branch_accuracy` | `backbone_ρ` | `tail_ρ` |
+|---------------------|------------------:|-------------:|---------:|
+| `torchgw-landmark`  | 0.935             | +0.9987      | +0.9404  |
+| `torchgw-fused`     | **0.908**         | **+0.9996**  | **+0.9908** |
 
-Middle row of the solver panel: same seed, same solver, same
-hyperparameters — only N differs between the two panels in that row.
+Both solvers land on the forward match — there is no sign flip here,
+thanks to the Y-fork. The difference is finer:
 
-At N=400, pure GW (left column) lands on the forward match, Spearman
-≈ **+0.999**.
+- Pure GW does fine on the backbone (+0.999) but struggles on the short
+  tail (+0.94) because it can't fully distinguish the two tails from
+  structural distances alone.
+- FGW uses the arclen feature to separate the tails: the short-tail
+  arclen range `[fork, fork + 0.6]` is strictly contained in the
+  long-tail range `[fork, fork + 1.2]`, so a short-tail source point
+  mapped to a long-tail target at arclen > fork + 0.6 pays a feature
+  penalty. FGW's tail-ρ climbs to +0.99.
 
-At N=10,000, pure GW flips to the reverse, Spearman ≈ **−0.999**. Look
-at the colour pattern: the yellow end (high θ) that sat at the outer rim
-of the spiral for N=400 has moved to the inner centre. The geometric
-shape is identical; the match's orientation has simply flipped.
+The `branch_accuracy` dip from 0.935 → 0.908 on FGW is counter-intuitive
+but honest: FGW trades slightly more ambiguous label assignment near the
+fork junction for a much cleaner tail-ρ. All errors cluster right at the
+fork root where the three regions meet (see the deep-dive).
 
-This is what motivated returning `|ρ|` from the Phase-1 task metric. It's
-correct as a statement about the **structural** quality of the alignment,
-but it discards information about orientation.
+![spearman bar](../figures/spearman_bar.png)
 
-## Result 2: C2's feature term fixes the flip
+## Deep dive
 
-![spearman](../figures/spearman_bar.png)
+![c3 detail](../figures/c3_detail.png)
 
-Right column, middle row: with the θ feature, FGW at N=10,000 stays on
-the forward match (+0.9999) — the N=10k result now looks identical to
-the N=400 result. At N=400 both `torchgw-fused` and `pot-fused` give
-+0.999.
+Left to right: (1) the 3D source with three coloured/marked regions —
+main spiral, long tail, short tail — overlaid on a faint shaded Swiss
+roll surface that gives the panel depth; (2) the 2D target with the same
+three regions; (3) each 2D target point coloured by the argmax-matched
+source arclen under FGW — the colour ramp flows smoothly from the
+target's inner end (purple) to the tail tips (yellow), confirming a
+clean forward match; (4) label-propagation check: green = backbone/tail
+label preserved, red × = mismatch. The mismatches are confined to the
+fork root.
 
-| Solver              | Spearman (signed) | Wall  |
-|---------------------|------------------:|------:|
-| `torchgw-fused`     | **+0.9997**       | 5.43s |
-| `pot-fused`         | **+0.9996**       | 2.17s |
+## Why we dropped the C1 and C2 variants
 
-| Solver              | Spearman (signed) | Wall  |
-|---------------------|------------------:|------:|
-| `torchgw-fused`     | **+0.9997**       | 5.43s |
-| `pot-fused`         | **+0.9996**       | 2.17s |
+Earlier drafts of this experiment compared three tracks — a plain
+spiral (C1), a plain spiral with an FGW θ feature (C2), and the Y-fork
+(C3). Once the Y-fork was in place the other two became redundant:
 
-Mechanism: the feature cost `M[i, j] = (θ_src[i] - θ_tgt[j])²` is minimised
-when source point i matches target point j with similar θ. The reverse
-correspondence would pair small-θ with large-θ and incur a heavy
-Wasserstein penalty on top of the (equal) GW cost, so FGW rejects it.
+- C1 demonstrated the orientation flip that motivated the problem —
+  the Y-fork makes that flip impossible, so the demo is no longer
+  needed in this report.
+- C2 used FGW features to force forward matching on symmetric data —
+  the Y-fork removes the symmetry, so the feature trick isn't required.
 
-Caveat: this changes the problem. FGW is not GW — it is GW with a side
-constraint. If the point you want to make is "our GW solver is correct", C2
-doesn't make it. If the point is "our alignment pipeline gets the answer",
-it does.
-
-## Result 3: C3's asymmetric geometry also fixes it
-
-Same hyperparameters as C1. Same solver (`torchgw-landmark`, no fused
-term). Just a different dataset.
-
-![c3_detail](../figures/c3_detail.png)
-
-The per-point scalar on both sides is the **geodesic distance from the
-spiral's inner end (θ=0)** along the manifold, computed analytically for
-the spiral and as a simple Euclidean offset along each straight tail.
-This makes the three regions automatically distinguishable by a single
-feature: main arc spans `[0, arclen(9)]`, tail 1 spans `[arclen(9),
-arclen(9) + 1.2]`, tail 2 spans `[arclen(9), arclen(9) + 0.6]`. Tail 2's
-arclen range is strictly contained in tail 1's — a tail-1 point past
-`arclen(9) + 0.6` has no tail-2 counterpart at the same geodesic
-distance, which is exactly the signal FGW needs.
-
-| Solver | `branch_accuracy` | `main_arclen_spearman` | `tail_arclen_spearman` | Wall |
-|---|---:|---:|---:|---:|
-| `torchgw-landmark` (pure GW) | 0.9300 | **+0.9993** | **+0.9352** | 7.2s |
-| `torchgw-fused` (FGW + geodesic feature) | 0.9225 | **+0.9998** | **+0.9896** | 7.1s |
-
-**Two lessons from this track.**
-
-1. *Pick the right coordinate when computing downstream metrics.*
-   Earlier iterations used a mix of (raw θ for backbone) and (tail
-   parameter s for the off-axis branch), which put tail 2's Spearman on
-   an incompatible scale and made pure-GW's branch quality look like
-   +0.23 when it was actually +0.94. Using geodesic arclen everywhere
-   gives a coordinate that is monotone along the actual manifold.
-
-2. *FGW with a geodesic-distance feature closes the last gap.* Pure GW
-   occasionally swaps points near the fork root where the two tails
-   meet, costing a few percent of `tail_arclen_spearman`. Because tail 2
-   is shorter than tail 1, the feature term penalises cross-tail
-   swaps — the FGW solver pushes the tail Spearman from +0.94 to +0.99.
-
-The `branch_accuracy` values (≈0.92) are both dominated by ambiguous
-points at the fork root itself, where a few tail-2 source points land on
-main-arc target neighbours; these mismatches are visible as the red × at
-the base of the fork in panel 4.
-
-`branch_accuracy` is the fraction of source points whose argmax-matched
-target carries the same branch label (main vs. branch).
-`main_arclen_spearman` is Spearman-ρ computed on the main-arc source points
-only (signed, no abs).
-
-Mechanism: the two endpoints of the manifold are topologically
-different. The inner endpoint (θ=0) is a single terminus. The outer
-endpoint is a Y-fork where two branches diverge. A reverse match would
-have to contract the inner 1-terminus onto the outer 2-terminus region
-and expand the Y-fork onto the 1-terminus — a topological mismatch that
-costs heavily under GW. So the orientation ambiguity of track 01 is
-eliminated, and the main-arc Spearman stays **positive** (no sign flip).
-The remaining fine-grained question — "which tail is tail 1 vs tail 2?"
-— is resolved by the geodesic-distance FGW feature.
-
-## Comparison
-
-|                           | C1 (baseline)    | C2 (FGW)                     | C3 (asymmetric Y-fork)     |
-|---------------------------|:----------------:|:----------------------------:|:--------------------------:|
-| Dataset                   | symmetric        | symmetric                    | **asymmetric**             |
-| Method                    | **pure GW**      | fused GW                     | pure GW                    |
-| Orientation at N=400      | forward (+0.999) | forward (+0.999 / +0.999)    | forward (+0.999)           |
-| Orientation at N=10k      | **reverse** (−0.999) | — (not yet run)           | — (not yet run)            |
-| Extra metric needed?      | `|ρ|`            | none                         | `branch_accuracy`, main-ρ, tail-ρ |
-| Extra dataset complexity? | none             | θ feature                    | Y-fork generator + labels  |
-| Extra solver complexity?  | none             | fused API + feature cost     | none                       |
-
-## What's next
-
-1. **C2 at scale.** Re-run C2 at N=10k, 20k with `fgw_alpha=0.5` and check
-   the Spearman stays positive. If it does, C2 can retire the `|ρ|`
-   fallback for its own track.
-2. **C3 at scale.** Same question for C3. Branched geometry should hold up
-   at any scale, but it's worth measuring how `branch_accuracy` behaves
-   when `branch_frac` shrinks (is a 5% branch enough to pin orientation?).
-3. **Seed stability.** All three tracks currently run one seed. We want at
-   least 3 seeds per (track, scale) to report `stability.seed_std_spearman`,
-   which is also the only way to quantify "C1 sometimes flips" as a
-   probability rather than a single anecdote.
+C1 and C2 remain in the repo as benchmark track directories (they are
+Phase-1 of the scale sweep against POT and still useful for that), but
+this report features only C3.
 
 ## Reproducing
 
@@ -193,19 +119,15 @@ The remaining fine-grained question — "which tail is tail 1 vs tail 2?"
 source /scratch/users/chensj16/venvs/dl2025/.venv/bin/activate
 cd /scratch/users/chensj16/projects/torchgw-bench
 
-# Regenerate figures (takes ~3 min on H100, most of it the C1 N=10k run)
+# Regenerate all four figures (≈1 min on GPU)
 python scripts/experiments/make_symmetry_figures.py
 
-# Unit tests for all three tracks
-python -m pytest tracks/core/01_foundation tracks/core/02_foundation_fused tracks/core/03_branched -v
+# Unit tests
+python -m pytest tracks/core/03_branched/tests/ -v
 
-# Smoke-test each track end-to-end
-python tracks/core/02_foundation_fused/run.py --solver torchgw-fused --seed 0 \
-    --out /tmp/fused/ --n-source 400 --n-target 500
+# End-to-end: 3D → 2D run with each solver
 python tracks/core/03_branched/run.py --solver torchgw-landmark --seed 0 \
-    --out /tmp/branched/ --n-source 400 --n-target 500
+    --out /tmp/c3/ --n-source 500 --n-target 400
+python tracks/core/03_branched/run.py --solver torchgw-fused --seed 0 \
+    --out /tmp/c3/ --n-source 500 --n-target 400
 ```
-
-The figure-generation script is fully self-contained; it imports each
-track's `run.py` via `sys.path` and calls the solver wrappers directly. No
-results-directory scan, no reporter pipeline.

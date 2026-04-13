@@ -510,11 +510,11 @@ def main() -> None:
         subset=args.subset,
     )
     rec["dataset"] = {
-        "name": f"yfork_spiral_{args.n_source}_yfork_swissroll_{args.n_target}",
+        "name": f"yfork_swissroll_{args.n_source}_yfork_spiral_{args.n_target}",
         "n_source": args.n_source,
         "n_target": args.n_target,
-        "source_dim": 2,
-        "target_dim": 3,
+        "source_dim": 3,  # swiss roll (with Y-fork) is now the source
+        "target_dim": 2,  # spiral (with Y-fork) is the target
         "branch_frac": args.branch_frac,
         "theta_tail_start": args.theta_tail_start,
         "tail1_len": args.tail1_len,
@@ -530,13 +530,17 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        X, src_arclens, src_labels = sample_branched_spiral(
+        # Source is the 3D Swiss roll with Y-fork; target is the 2D spiral
+        # with Y-fork. Flipping the dim direction (dimensionality reduction
+        # framing) is narratively tighter and preserves the asymmetric
+        # geometry needed to break GW's orientation ambiguity.
+        X, src_arclens, src_labels = sample_branched_swiss_roll(
             args.n_source, branch_frac=args.branch_frac,
             theta_tail_start=args.theta_tail_start,
             tail1_len=args.tail1_len, tail2_len=args.tail2_len,
             tail2_angle=args.tail2_angle, seed=args.seed,
         )
-        Y, tgt_arclens, tgt_labels = sample_branched_swiss_roll(
+        Y, tgt_arclens, tgt_labels = sample_branched_spiral(
             args.n_target, branch_frac=args.branch_frac,
             theta_tail_start=args.theta_tail_start,
             tail1_len=args.tail1_len, tail2_len=args.tail2_len,
