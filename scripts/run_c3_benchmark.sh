@@ -33,7 +33,10 @@ SOLVERS=("torchgw-landmark" "torchgw-fused" "pot-fused")
 declare -A SCALES
 SCALES[400]="500"
 SCALES[1000]="1200"
+SCALES[2000]="2500"
+SCALES[3000]="3700"
 SCALES[4000]="5000"
+SCALES[7500]="9000"
 SCALES[10000]="12000"
 SCALES[20000]="25000"
 
@@ -66,7 +69,7 @@ if [[ "$QUICK" -eq 1 ]]; then
 fi
 
 echo "[c3-bench] === E2: scale sweep, 3 seeds per cell ==="
-for n_src in 1000 4000 10000 20000; do
+for n_src in 1000 2000 3000 4000 7500 10000 20000; do
     n_tgt="${SCALES[$n_src]}"
     for seed in 0 1 2; do
         for solver in "${SOLVERS[@]}"; do

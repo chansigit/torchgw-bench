@@ -251,6 +251,97 @@ def make_e2_figure(records: list[dict]) -> Path:
     return out
 
 
+def make_torchgw_vs_pot_figure(records: list[dict]) -> Path:
+    """Focused torchgw-vs-POT comparison across N: quality (backbone-ρ,
+    tail-ρ) AND cost (wall time, GPU memory) in a single 2×2 publication
+    figure. Shaded bands show ±1σ across seeds at each scale.
+    """
+    # Aggregate: (solver, n_source) -> per-metric list across seeds
+    by_key: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    for r in records:
+        if r.get("status") != "ok":
+            continue
+        n = int(r.get("dataset", {}).get("n_source", -1))
+        solver = str(r.get("solver", "?"))
+        by_key[(solver, n)].append(r)
+
+    scales = sorted({n for (_s, n) in by_key.keys()})
+
+    def _series(solver: str, path: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        xs, ys, es = [], [], []
+        for n in scales:
+            vals = []
+            for r in by_key.get((solver, n), []):
+                v = _metric(r, path, default=None)
+                if v is None:
+                    continue
+                try:
+                    vf = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if np.isfinite(vf):
+                    vals.append(vf)
+            if vals:
+                xs.append(n)
+                ys.append(float(np.mean(vals)))
+                es.append(float(np.std(vals, ddof=0)))
+        return np.asarray(xs, float), np.asarray(ys, float), np.asarray(es, float)
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+
+    panel_spec = [
+        # (ax_idx, path, ylabel, yscale, ylim, threshold)
+        ((0, 0), "metrics.efficiency.wall_s",           "wall (s)",               "log",    None,         None),
+        ((0, 1), "metrics.efficiency.gpu_peak_gb",      "GPU peak memory (GB)",   "log",    None,         None),
+        ((1, 0), "metrics.task.main_arclen_spearman",   r"backbone Spearman $\rho$", "linear", (-1.1, 1.1), 0.95),
+        ((1, 1), "metrics.task.tail_arclen_spearman",   r"tail Spearman $\rho$",     "linear", (-1.1, 1.1), 0.95),
+    ]
+
+    for (r, c), path, ylabel, yscale, ylim, thr in panel_spec:
+        ax = axes[r, c]
+        any_data = False
+        for solver in SOLVER_ORDER:
+            xs, ys, es = _series(solver, path)
+            if len(xs) == 0:
+                continue
+            any_data = True
+            ax.plot(xs, ys, "-o", color=SOLVER_COLOR[solver],
+                    label=SOLVER_LABEL[solver], lw=1.8, ms=6,
+                    markeredgecolor="black", markeredgewidth=0.5)
+            lo = ys - es
+            hi = ys + es
+            if yscale == "log":
+                lo = np.maximum(lo, 1e-4)
+            ax.fill_between(xs, lo, hi, color=SOLVER_COLOR[solver],
+                            alpha=0.18, linewidth=0)
+        ax.set_xscale("log")
+        if yscale == "log":
+            ax.set_yscale("log")
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        if thr is not None:
+            ax.axhline(thr, color="#2ca02c", lw=0.8, linestyle=":",
+                       alpha=0.8, zorder=0)
+            ax.axhline(-thr, color="#2ca02c", lw=0.8, linestyle=":",
+                       alpha=0.8, zorder=0)
+            ax.axhline(0.0, color="#888", lw=0.6, linestyle="-",
+                       alpha=0.5, zorder=0)
+        ax.set_xlabel("N (source size)")
+        ax.set_ylabel(ylabel)
+        ax.grid(True, which="both", alpha=0.25, linestyle=":")
+        if any_data and (r, c) == (0, 0):
+            ax.legend(loc="upper left", fontsize=8.5, frameon=False)
+
+    fig.suptitle("torchgw vs POT across scale — quality (bottom row) and cost "
+                 "(top row), mean ± σ over 3–5 seeds",
+                 fontsize=13, fontweight="bold", y=1.00)
+    fig.tight_layout()
+    out = FIG_DIR / "torchgw_vs_pot.png"
+    fig.savefig(out, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Plot C3 benchmark sweep")
     ap.add_argument("--results", type=Path, default=DEFAULT_RESULTS)
@@ -265,6 +356,8 @@ def main() -> None:
     print(f"[plot] wrote {p1}")
     p2 = make_e2_figure(records)
     print(f"[plot] wrote {p2}")
+    p3 = make_torchgw_vs_pot_figure(records)
+    print(f"[plot] wrote {p3}")
 
 
 if __name__ == "__main__":
