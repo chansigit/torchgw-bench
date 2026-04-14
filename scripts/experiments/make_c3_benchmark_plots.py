@@ -59,7 +59,6 @@ SOLVER_LABEL = {
 }
 SOLVER_ORDER = [
     "torchgw-landmark", "torchgw-dijkstra", "torchgw-precomputed",
-    "pot-entropic", "pot-exact", "pot-bapg",
     "pot-entropic-gpu", "pot-exact-gpu", "pot-bapg-gpu",
 ]
 
@@ -134,9 +133,13 @@ def make_e1_figure(records: list[dict]) -> Path:
         ax.bar(x, means, bar_w, yerr=stds, color=colors, edgecolor="black",
                linewidth=0.6, capsize=4, error_kw=dict(lw=1.0, ecolor="#222"))
         ax.set_xticks(x)
-        ax.set_xticklabels([s.split("·")[0].strip()
-                             for s in (SOLVER_LABEL[s] for s in SOLVER_ORDER)],
-                            rotation=15, fontsize=8.5, ha="right")
+        # Strip the (GPU)/(CPU) suffix and keep family+algorithm, e.g.
+        # "torchgw-landmark", "POT-exact".
+        ax.set_xticklabels(
+            [SOLVER_LABEL[s].split("(")[0].strip().replace(" · ", "-")
+             for s in SOLVER_ORDER],
+            rotation=90, fontsize=8.5, ha="center",
+        )
         ax.set_title(label, fontsize=11)
         if ylim is not None:
             ax.set_ylim(*ylim)
@@ -454,7 +457,8 @@ def make_rho_by_position_figure(records: list[dict], N_for_positions: int = 4000
                label=SOLVER_LABEL[solver])
 
     ax.set_xticks(x_groups)
-    ax.set_xticklabels([p[0] for p in positions_compact], fontsize=11)
+    ax.set_xticklabels([p[0] for p in positions_compact],
+                        rotation=90, fontsize=11, ha="center")
     ax.set_ylabel(r"Spearman $\rho$")
     ax.set_ylim(-0.05, 1.05)
     ax.axhline(0.95, color="#2ca02c", lw=0.6, linestyle=":", alpha=0.8)
