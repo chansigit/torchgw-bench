@@ -35,6 +35,9 @@ SOLVERS=(
     "pot-entropic"
     "pot-exact"
     "pot-bapg"
+    "pot-entropic-gpu"
+    "pot-exact-gpu"
+    "pot-bapg-gpu"
 )
 
 declare -A SCALES

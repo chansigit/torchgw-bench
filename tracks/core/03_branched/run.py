@@ -334,6 +334,51 @@ def build_record(track: str, solver: str, seed: int, subset: str) -> dict:
 # All three POT variants share the pot_too_large memory guard.
 
 
+class _RSSSampler:
+    """Polling sampler that records peak process RSS during a code block.
+
+    Used to report CPU memory peak for each solver, alongside
+    torch.cuda.max_memory_allocated for GPU peak. Usage::
+
+        sampler = _RSSSampler()
+        with sampler:
+            ... solver call ...
+        peak_bytes = sampler.peak
+    """
+    def __init__(self, interval_s: float = 0.05):
+        import psutil, threading
+        self._psutil = psutil
+        self._threading = threading
+        self._interval = interval_s
+        self._proc = psutil.Process()
+        self._stop = threading.Event()
+        self._thread = None
+        self.peak = 0
+
+    def __enter__(self):
+        self.peak = int(self._proc.memory_info().rss)
+        self._stop.clear()
+        self._thread = self._threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def _run(self):
+        import time as _time
+        while not self._stop.is_set():
+            try:
+                rss = int(self._proc.memory_info().rss)
+            except Exception:
+                rss = self.peak
+            if rss > self.peak:
+                self.peak = rss
+            _time.sleep(self._interval)
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+
 def pot_too_large(n_source: int, n_target: int, threshold: int = 5_000) -> bool:
     """POT FGW variants all build dense O(N^2)/O(K^2) cost matrices. Above
     max(N, K) = 5000 the memory and wall time blow up; main() emits a
@@ -354,8 +399,8 @@ def _build_feature_cost(
     return M
 
 
-def _torchgw_env_and_seed(seed: int):
-    """Reset CUDA stats, seed, return (torch module, use_cuda flag)."""
+def _reset_tracking(seed: int):
+    """Reset CUDA peak stats and seed RNGs. Returns (torch, use_cuda)."""
     import torch
     use_cuda = torch.cuda.is_available()
     if use_cuda:
@@ -366,26 +411,50 @@ def _torchgw_env_and_seed(seed: int):
     return torch, use_cuda
 
 
-def _finalize_torchgw(T, log, use_cuda: bool, wall_s: float,
-                       hyperparams: dict) -> dict:
+def _build_metrics(wall_preprocess: float, wall_solve: float,
+                    ram_peak_bytes: int, use_cuda: bool) -> dict:
+    """Build a consistent metric block shared by every solver wrapper.
+
+    Every solver reports:
+      wall_s_preprocess  — distance-matrix / feature build (0 for solvers
+                            that cannot separate preprocessing from the
+                            main call, e.g. landmark/dijkstra torchgw).
+      wall_s_solve       — the transport-plan optimisation call itself.
+      wall_s_total       — preprocess + solve, end-to-end wall clock.
+      gpu_peak_gb        — torch.cuda.max_memory_allocated (None on CPU).
+      ram_peak_gb        — process RSS peak during the call, captured by
+                            the _RSSSampler thread.
+    """
     import torch
-    log_d: dict = log if isinstance(log, dict) else {}  # type: ignore[arg-type]
-    T_np = T.detach().cpu().numpy() if hasattr(T, "detach") else np.asarray(T)
-    marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - 1.0 / T_np.shape[0])))
     gpu_peak_gb = (
         torch.cuda.max_memory_allocated() / (1024 ** 3) if use_cuda else None
     )
-    import torchgw as _torchgw
     return {
+        "wall_s_preprocess": float(wall_preprocess),
+        "wall_s_solve":      float(wall_solve),
+        "wall_s_total":      float(wall_preprocess + wall_solve),
+        "gpu_peak_gb":       gpu_peak_gb,
+        "ram_peak_gb":       ram_peak_bytes / (1024 ** 3),
+    }
+
+
+def _finalize_torchgw(T, log, meta: dict, hyperparams: dict) -> dict:
+    log_d: dict = log if isinstance(log, dict) else {}  # type: ignore[arg-type]
+    T_np = T.detach().cpu().numpy() if hasattr(T, "detach") else np.asarray(T)
+    marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - 1.0 / T_np.shape[0])))
+    import torchgw as _torchgw
+    rec = {
         "T": T_np,
         "gw_cost": float(log_d.get("gw_cost", float("nan"))),
         "marginal_error": marginal_error,
-        "wall_s": wall_s,
-        "gpu_peak_gb": gpu_peak_gb,
         "iterations": int(log_d.get("n_iter", log_d.get("iterations", 0))),
         "hyperparams": hyperparams,
         "solver_version": f"torchgw=={getattr(_torchgw, '__version__', 'unknown')}",
     }
+    rec.update(meta)
+    # Back-compat: many downstream scripts read "wall_s"
+    rec["wall_s"] = meta["wall_s_total"]
+    return rec
 
 
 def run_torchgw_landmark(
@@ -401,25 +470,33 @@ def run_torchgw_landmark(
     n_landmarks: int = 50,
     fgw_alpha: float = 0.5,
 ) -> dict:
-    """torchgw.sampled_gw in landmark distance mode, FGW with arclen feature."""
+    """torchgw.sampled_gw in landmark distance mode, FGW with arclen feature.
+
+    Landmark distance computation happens inside sampled_gw, so it cannot
+    be separated from solve time; wall_s_preprocess = 0 and the whole
+    call falls in wall_s_solve.
+    """
     from torchgw import sampled_gw
-    torch, use_cuda = _torchgw_env_and_seed(seed)
-    M_feat = _build_feature_cost(src_arclens, tgt_arclens)
+    torch, use_cuda = _reset_tracking(seed)
+    with _RSSSampler() as sampler:
+        t_prep_start = time.perf_counter()
+        M_feat = _build_feature_cost(src_arclens, tgt_arclens)
+        t_prep = time.perf_counter() - t_prep_start  # tiny feature cost
+        t0 = time.perf_counter()
+        T, log = sampled_gw(  # type: ignore[misc]
+            X, Y,
+            distance_mode="landmark", mixed_precision=True,
+            M=M_samples, epsilon=epsilon, max_iter=max_iter,
+            k=k, n_landmarks=n_landmarks,
+            fgw_alpha=fgw_alpha, C_linear=M_feat,
+            log=True, verbose=False,
+        )
+        if use_cuda:
+            torch.cuda.synchronize()
+        t_solve = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
-    T, log = sampled_gw(  # type: ignore[misc]
-        X, Y,
-        distance_mode="landmark", mixed_precision=True,
-        M=M_samples, epsilon=epsilon, max_iter=max_iter,
-        k=k, n_landmarks=n_landmarks,
-        fgw_alpha=fgw_alpha, C_linear=M_feat,
-        log=True, verbose=False,
-    )
-    if use_cuda:
-        torch.cuda.synchronize()
-    wall_s = time.perf_counter() - t0
-
-    return _finalize_torchgw(T, log, use_cuda, wall_s, {
+    meta = _build_metrics(t_prep, t_solve, sampler.peak, use_cuda)
+    return _finalize_torchgw(T, log, meta, {
         "M_samples": M_samples, "epsilon": epsilon, "max_iter": max_iter,
         "k": k, "n_landmarks": n_landmarks, "fgw_alpha": fgw_alpha,
         "distance_mode": "landmark", "mixed_precision": True,
@@ -440,27 +517,30 @@ def run_torchgw_dijkstra(
 ) -> dict:
     """torchgw.sampled_gw in dijkstra distance mode, FGW with arclen feature.
 
-    Structural distances are exact geodesics on a kNN graph (k=5 here)
-    computed by Dijkstra inside torchgw.
+    Structural distances are exact kNN-graph geodesics computed inside
+    sampled_gw; preprocessing cannot be separated out.
     """
     from torchgw import sampled_gw
-    torch, use_cuda = _torchgw_env_and_seed(seed)
-    M_feat = _build_feature_cost(src_arclens, tgt_arclens)
+    torch, use_cuda = _reset_tracking(seed)
+    with _RSSSampler() as sampler:
+        t_prep_start = time.perf_counter()
+        M_feat = _build_feature_cost(src_arclens, tgt_arclens)
+        t_prep = time.perf_counter() - t_prep_start
+        t0 = time.perf_counter()
+        T, log = sampled_gw(  # type: ignore[misc]
+            X, Y,
+            distance_mode="dijkstra", mixed_precision=True,
+            M=M_samples, epsilon=epsilon, max_iter=max_iter,
+            k=k,
+            fgw_alpha=fgw_alpha, C_linear=M_feat,
+            log=True, verbose=False,
+        )
+        if use_cuda:
+            torch.cuda.synchronize()
+        t_solve = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
-    T, log = sampled_gw(  # type: ignore[misc]
-        X, Y,
-        distance_mode="dijkstra", mixed_precision=True,
-        M=M_samples, epsilon=epsilon, max_iter=max_iter,
-        k=k,
-        fgw_alpha=fgw_alpha, C_linear=M_feat,
-        log=True, verbose=False,
-    )
-    if use_cuda:
-        torch.cuda.synchronize()
-    wall_s = time.perf_counter() - t0
-
-    return _finalize_torchgw(T, log, use_cuda, wall_s, {
+    meta = _build_metrics(t_prep, t_solve, sampler.peak, use_cuda)
+    return _finalize_torchgw(T, log, meta, {
         "M_samples": M_samples, "epsilon": epsilon, "max_iter": max_iter,
         "k": k, "fgw_alpha": fgw_alpha,
         "distance_mode": "dijkstra", "mixed_precision": True,
@@ -480,48 +560,52 @@ def run_torchgw_precomputed(
 ) -> dict:
     """torchgw.sampled_gw with precomputed dense Euclidean distance matrices.
 
-    The structural distances are raw (no manifold-aware reweighting) — a
-    natural baseline to contrast against the kNN-geodesic variants.
+    Preprocessing (the dense cdist) is timed separately so the caller can
+    see how much of the wall goes into one-off distance construction vs.
+    the repeatable solve call.
     """
     from torchgw import sampled_gw
     from scipy.spatial.distance import cdist
-    torch, use_cuda = _torchgw_env_and_seed(seed)
+    torch, use_cuda = _reset_tracking(seed)
 
-    M_feat = _build_feature_cost(src_arclens, tgt_arclens)
-    dist_source = cdist(X, X, metric="euclidean").astype(np.float32)
-    dist_target = cdist(Y, Y, metric="euclidean").astype(np.float32)
-    dist_source /= (dist_source.max() + 1e-12)
-    dist_target /= (dist_target.max() + 1e-12)
+    with _RSSSampler() as sampler:
+        t_prep_start = time.perf_counter()
+        M_feat = _build_feature_cost(src_arclens, tgt_arclens)
+        dist_source = cdist(X, X, metric="euclidean").astype(np.float32)
+        dist_target = cdist(Y, Y, metric="euclidean").astype(np.float32)
+        dist_source /= (dist_source.max() + 1e-12)
+        dist_target /= (dist_target.max() + 1e-12)
+        n_src, n_tgt = X.shape[0], Y.shape[0]
+        p = np.full(n_src, 1.0 / n_src, dtype=np.float64)
+        q = np.full(n_tgt, 1.0 / n_tgt, dtype=np.float64)
+        t_prep = time.perf_counter() - t_prep_start
 
-    n_src, n_tgt = X.shape[0], Y.shape[0]
-    p = np.full(n_src, 1.0 / n_src, dtype=np.float64)
-    q = np.full(n_tgt, 1.0 / n_tgt, dtype=np.float64)
+        t0 = time.perf_counter()
+        T, log = sampled_gw(  # type: ignore[misc]
+            X_source=X, X_target=Y, p=p, q=q,
+            distance_mode="precomputed",
+            dist_source=dist_source, dist_target=dist_target,
+            mixed_precision=True,
+            M=M_samples, epsilon=epsilon, max_iter=max_iter,
+            fgw_alpha=fgw_alpha, C_linear=M_feat,
+            log=True, verbose=False,
+        )
+        if use_cuda:
+            torch.cuda.synchronize()
+        t_solve = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
-    T, log = sampled_gw(  # type: ignore[misc]
-        X_source=X, X_target=Y, p=p, q=q,
-        distance_mode="precomputed",
-        dist_source=dist_source, dist_target=dist_target,
-        mixed_precision=True,
-        M=M_samples, epsilon=epsilon, max_iter=max_iter,
-        fgw_alpha=fgw_alpha, C_linear=M_feat,
-        log=True, verbose=False,
-    )
-    if use_cuda:
-        torch.cuda.synchronize()
-    wall_s = time.perf_counter() - t0
-
-    return _finalize_torchgw(T, log, use_cuda, wall_s, {
+    meta = _build_metrics(t_prep, t_solve, sampler.peak, use_cuda)
+    return _finalize_torchgw(T, log, meta, {
         "M_samples": M_samples, "epsilon": epsilon, "max_iter": max_iter,
         "fgw_alpha": fgw_alpha,
         "distance_mode": "precomputed", "mixed_precision": True,
     })
 
 
-def _pot_common_setup(X: np.ndarray, Y: np.ndarray,
-                       src_arclens: np.ndarray, tgt_arclens: np.ndarray,
-                       seed: int):
-    """Build C1, C2, M_feat, p, q used by every POT FGW variant."""
+def _pot_common_setup_cpu(X: np.ndarray, Y: np.ndarray,
+                            src_arclens: np.ndarray, tgt_arclens: np.ndarray,
+                            seed: int):
+    """Build (C1, C2, M_feat, p, q) as float64 numpy arrays for POT CPU."""
     import ot
     C1 = np.asarray(ot.dist(X, X, metric="sqeuclidean"), dtype=np.float64)
     C2 = np.asarray(ot.dist(Y, Y, metric="sqeuclidean"), dtype=np.float64)
@@ -534,7 +618,35 @@ def _pot_common_setup(X: np.ndarray, Y: np.ndarray,
     return C1, C2, M_feat, p, q
 
 
-def _finalize_pot(T_and_log, wall_s: float, hyperparams: dict) -> dict:
+def _pot_common_setup_gpu(X: np.ndarray, Y: np.ndarray,
+                            src_arclens: np.ndarray, tgt_arclens: np.ndarray,
+                            seed: int):
+    """Build (C1, C2, M_feat, p, q) as torch tensors on GPU for POT's
+    torch backend. POT auto-dispatches to GPU when tensors are on CUDA.
+    """
+    import torch
+    device = torch.device("cuda")
+    X_t = torch.as_tensor(X, device=device, dtype=torch.float32)
+    Y_t = torch.as_tensor(Y, device=device, dtype=torch.float32)
+    C1 = torch.cdist(X_t, X_t) ** 2
+    C2 = torch.cdist(Y_t, Y_t) ** 2
+    C1 /= (C1.max() + 1e-12)
+    C2 /= (C2.max() + 1e-12)
+    F_src = torch.as_tensor(src_arclens, device=device, dtype=torch.float32).unsqueeze(1)
+    F_tgt = torch.as_tensor(tgt_arclens, device=device, dtype=torch.float32).unsqueeze(1)
+    M_feat = torch.cdist(F_src, F_tgt) ** 2
+    M_feat /= (M_feat.max() + 1e-12)
+    p = torch.full((X.shape[0],), 1.0 / X.shape[0],
+                    device=device, dtype=torch.float32)
+    q = torch.full((Y.shape[0],), 1.0 / Y.shape[0],
+                    device=device, dtype=torch.float32)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    return C1, C2, M_feat, p, q
+
+
+def _finalize_pot(T_and_log, meta: dict, hyperparams: dict) -> dict:
+    import torch
     from typing import Any
     import ot
     pot_log: dict[str, Any] = {}
@@ -544,119 +656,131 @@ def _finalize_pot(T_and_log, wall_s: float, hyperparams: dict) -> dict:
             pot_log = _raw_log
     else:
         T = T_and_log
-    T_np = np.asarray(T, dtype=np.float64)
+    if hasattr(T, "detach"):
+        T_np = T.detach().cpu().numpy().astype(np.float64)
+    else:
+        T_np = np.asarray(T, dtype=np.float64)
     p_uniform = 1.0 / T_np.shape[0]
     marginal_error = float(np.max(np.abs(T_np.sum(axis=1) - p_uniform)))
-    gw_cost = float(
+
+    def _as_float(v):
+        if hasattr(v, "detach"):
+            return float(v.detach().cpu().item())
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    gw_cost = _as_float(
         pot_log.get("fgw_dist", pot_log.get("gw_dist", float("nan")))
     )
     err_list: list = pot_log.get("err") or []
     iterations = len(err_list) if err_list else -1
-    return {
+    rec = {
         "T": T_np,
         "gw_cost": gw_cost,
         "marginal_error": marginal_error,
-        "wall_s": wall_s,
-        "gpu_peak_gb": None,
         "iterations": iterations,
         "hyperparams": hyperparams,
         "solver_version": f"pot=={getattr(ot, '__version__', 'unknown')}",
     }
+    rec.update(meta)
+    rec["wall_s"] = meta["wall_s_total"]  # back-compat
+    return rec
 
 
-def run_pot_entropic(
-    X: np.ndarray,
-    Y: np.ndarray,
-    src_arclens: np.ndarray,
-    tgt_arclens: np.ndarray,
-    seed: int = 0,
-    epsilon: float = 5e-3,
-    max_iter: int = 500,
-    alpha: float = 0.5,
-) -> dict:
-    """POT entropic (Sinkhorn-regularised) FGW."""
-    import ot.gromov as otgw
-    C1, C2, M_feat, p, q = _pot_common_setup(X, Y, src_arclens, tgt_arclens, seed)
-    t0 = time.perf_counter()
-    T_and_log = otgw.entropic_fused_gromov_wasserstein(
-        M_feat, C1, C2, p, q,
-        loss_fun="square_loss", epsilon=epsilon,
-        alpha=alpha, max_iter=max_iter, tol=1e-9,
-        log=True, verbose=False,
-    )
-    wall_s = time.perf_counter() - t0
-    return _finalize_pot(T_and_log, wall_s, {
-        "epsilon": epsilon, "max_iter": max_iter, "alpha": alpha,
-        "loss_fun": "square_loss", "algorithm": "entropic",
-    })
-
-
-def run_pot_exact(
-    X: np.ndarray,
-    Y: np.ndarray,
-    src_arclens: np.ndarray,
-    tgt_arclens: np.ndarray,
-    seed: int = 0,
-    max_iter: int = 500,
-    alpha: float = 0.5,
-    tol: float = 1e-6,
-) -> dict:
-    """POT exact (non-entropic) FGW via conditional gradient.
-
-    Capped at max_iter=500 with tol=1e-6 so the solver still returns in
-    reasonable time at N≥2000. tol_rel=1e-9 would be cleaner but runs
-    for tens of minutes on the larger scales.
+def _run_pot_variant(
+    X, Y, src_arclens, tgt_arclens, seed, backend: str,
+    algo_fn, algo_kwargs, hyperparams,
+):
+    """Shared driver for the six POT variants. `backend` is 'cpu' or 'gpu'.
+    `algo_fn` is the POT FGW function; `algo_kwargs` goes through.
     """
+    assert backend in ("cpu", "gpu")
+    import torch
+    use_cuda = (backend == "gpu") and torch.cuda.is_available()
+    if use_cuda:
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.synchronize()
+
+    with _RSSSampler() as sampler:
+        t_prep_start = time.perf_counter()
+        if backend == "gpu":
+            C1, C2, M_feat, p, q = _pot_common_setup_gpu(
+                X, Y, src_arclens, tgt_arclens, seed)
+        else:
+            C1, C2, M_feat, p, q = _pot_common_setup_cpu(
+                X, Y, src_arclens, tgt_arclens, seed)
+        if use_cuda:
+            torch.cuda.synchronize()
+        t_prep = time.perf_counter() - t_prep_start
+
+        t0 = time.perf_counter()
+        T_and_log = algo_fn(M_feat, C1, C2, p, q, **algo_kwargs)
+        if use_cuda:
+            torch.cuda.synchronize()
+        t_solve = time.perf_counter() - t0
+
+    meta = _build_metrics(t_prep, t_solve, sampler.peak, use_cuda)
+    return _finalize_pot(T_and_log, meta,
+                          {**hyperparams, "backend": backend})
+
+
+def _make_pot_entropic(backend: str):
     import ot.gromov as otgw
-    C1, C2, M_feat, p, q = _pot_common_setup(X, Y, src_arclens, tgt_arclens, seed)
-    t0 = time.perf_counter()
-    T_and_log = otgw.fused_gromov_wasserstein(
-        M_feat, C1, C2, p, q,
-        loss_fun="square_loss", alpha=alpha,
-        max_iter=max_iter, tol_rel=tol, tol_abs=tol,
-        log=True,
-    )
-    wall_s = time.perf_counter() - t0
-    return _finalize_pot(T_and_log, wall_s, {
-        "max_iter": max_iter, "alpha": alpha, "tol": tol,
-        "loss_fun": "square_loss", "algorithm": "exact-CG",
-    })
+    def fn(X, Y, src_arclens, tgt_arclens, seed=0,
+            epsilon=5e-3, max_iter=50, alpha=0.5):
+        return _run_pot_variant(
+            X, Y, src_arclens, tgt_arclens, seed, backend,
+            otgw.entropic_fused_gromov_wasserstein,
+            dict(loss_fun="square_loss", epsilon=epsilon, alpha=alpha,
+                  max_iter=max_iter, tol=1e-9, log=True, verbose=False),
+            {"epsilon": epsilon, "max_iter": max_iter, "alpha": alpha,
+             "loss_fun": "square_loss", "algorithm": "entropic"},
+        )
+    return fn
 
 
-def run_pot_bapg(
-    X: np.ndarray,
-    Y: np.ndarray,
-    src_arclens: np.ndarray,
-    tgt_arclens: np.ndarray,
-    seed: int = 0,
-    epsilon: float = 5e-3,
-    max_iter: int = 50,
-    alpha: float = 0.5,
-    tol: float = 1e-6,
-) -> dict:
-    """POT Bregman Alternating Projected Gradient FGW.
-
-    Each BAPG iteration is dense O(N^2) and the vanilla settings
-    (max_iter=1000, tol=1e-9) run for many minutes at N≥2000 without
-    material quality gain. Empirically max_iter=50 matches the ρ of
-    max_iter=200 to within 1e-4 at a quarter the wall cost; we use
-    that as the default here so BAPG can finish inside the benchmark
-    budget. Downstream reports should flag the iteration cap explicitly.
-    """
+def _make_pot_exact(backend: str):
     import ot.gromov as otgw
-    C1, C2, M_feat, p, q = _pot_common_setup(X, Y, src_arclens, tgt_arclens, seed)
-    t0 = time.perf_counter()
-    T_and_log = otgw.BAPG_fused_gromov_wasserstein(
-        M_feat, C1, C2, p, q,
-        loss_fun="square_loss", epsilon=epsilon,
-        alpha=alpha, max_iter=max_iter, tol=tol,
-        log=True, verbose=False,
-    )
-    wall_s = time.perf_counter() - t0
-    return _finalize_pot(T_and_log, wall_s, {
-        "epsilon": epsilon, "max_iter": max_iter, "alpha": alpha,
-        "tol": tol, "loss_fun": "square_loss", "algorithm": "BAPG",
-    })
+    def fn(X, Y, src_arclens, tgt_arclens, seed=0,
+            max_iter=500, alpha=0.5, tol=1e-6):
+        return _run_pot_variant(
+            X, Y, src_arclens, tgt_arclens, seed, backend,
+            otgw.fused_gromov_wasserstein,
+            dict(loss_fun="square_loss", alpha=alpha,
+                  max_iter=max_iter, tol_rel=tol, tol_abs=tol, log=True),
+            {"max_iter": max_iter, "alpha": alpha, "tol": tol,
+             "loss_fun": "square_loss", "algorithm": "exact-CG"},
+        )
+    return fn
+
+
+def _make_pot_bapg(backend: str):
+    import ot.gromov as otgw
+    def fn(X, Y, src_arclens, tgt_arclens, seed=0,
+            epsilon=5e-3, max_iter=50, alpha=0.5, tol=1e-6):
+        return _run_pot_variant(
+            X, Y, src_arclens, tgt_arclens, seed, backend,
+            otgw.BAPG_fused_gromov_wasserstein,
+            dict(loss_fun="square_loss", epsilon=epsilon, alpha=alpha,
+                  max_iter=max_iter, tol=tol, log=True, verbose=False),
+            {"epsilon": epsilon, "max_iter": max_iter, "alpha": alpha,
+             "tol": tol, "loss_fun": "square_loss", "algorithm": "BAPG"},
+        )
+    return fn
+
+
+# Six POT variants: CPU and GPU for each of entropic / exact / bapg.
+run_pot_entropic     = _make_pot_entropic("cpu")
+run_pot_exact        = _make_pot_exact("cpu")
+run_pot_bapg         = _make_pot_bapg("cpu")
+run_pot_entropic_gpu = _make_pot_entropic("gpu")
+run_pot_exact_gpu    = _make_pot_exact("gpu")
+run_pot_bapg_gpu     = _make_pot_bapg("gpu")
+
+
+# (BAPG default max_iter=50 is documented in _make_pot_bapg.)
 
 
 # ---- main ---------------------------------------------------------------
@@ -670,6 +794,7 @@ def main() -> None:
     ap.add_argument("--solver", required=True, choices=[
         "torchgw-landmark", "torchgw-dijkstra", "torchgw-precomputed",
         "pot-entropic", "pot-exact", "pot-bapg",
+        "pot-entropic-gpu", "pot-exact-gpu", "pot-bapg-gpu",
     ])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, required=True)
@@ -712,8 +837,11 @@ def main() -> None:
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # POT memory guard — applies to all 3 POT FGW variants
-    if args.solver.startswith("pot-") and pot_too_large(args.n_source, args.n_target):
+    # POT CPU memory guard — only the CPU POT variants hit host-RAM limits.
+    # POT GPU variants are capped instead by GPU memory (~80GB on H100)
+    # which is big enough for our scales.
+    is_pot_cpu = args.solver in ("pot-entropic", "pot-exact", "pot-bapg")
+    if is_pot_cpu and pot_too_large(args.n_source, args.n_target):
         rec["status"] = "skip"
         rec["error"] = (
             f"skipped: POT O(N^2) memory guard "
@@ -742,12 +870,15 @@ def main() -> None:
         )
 
         solver_fns = {
-            "torchgw-landmark":    run_torchgw_landmark,
-            "torchgw-dijkstra":    run_torchgw_dijkstra,
-            "torchgw-precomputed": run_torchgw_precomputed,
-            "pot-entropic":        run_pot_entropic,
-            "pot-exact":           run_pot_exact,
-            "pot-bapg":            run_pot_bapg,
+            "torchgw-landmark":     run_torchgw_landmark,
+            "torchgw-dijkstra":     run_torchgw_dijkstra,
+            "torchgw-precomputed":  run_torchgw_precomputed,
+            "pot-entropic":         run_pot_entropic,
+            "pot-exact":            run_pot_exact,
+            "pot-bapg":             run_pot_bapg,
+            "pot-entropic-gpu":     run_pot_entropic_gpu,
+            "pot-exact-gpu":        run_pot_exact_gpu,
+            "pot-bapg-gpu":         run_pot_bapg_gpu,
         }
         fn = solver_fns.get(args.solver)
         if fn is None:
@@ -770,9 +901,13 @@ def main() -> None:
             ),
         }
         rec["metrics"]["efficiency"] = {
-            "wall_s": result["wall_s"],
-            "gpu_peak_gb": result["gpu_peak_gb"],
-            "iterations": result["iterations"],
+            "wall_s":            result["wall_s_total"],  # back-compat alias
+            "wall_s_preprocess": result["wall_s_preprocess"],
+            "wall_s_solve":      result["wall_s_solve"],
+            "wall_s_total":      result["wall_s_total"],
+            "gpu_peak_gb":       result["gpu_peak_gb"],
+            "ram_peak_gb":       result["ram_peak_gb"],
+            "iterations":        result["iterations"],
         }
     except Exception as e:
         rec["status"] = "fail"
