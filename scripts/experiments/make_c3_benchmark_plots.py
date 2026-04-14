@@ -34,18 +34,27 @@ DEFAULT_RESULTS = REPO / "results" / "c3_benchmark"
 FIG_DIR = REPO / "docs" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Print-friendly palette per solver (matches schematic style)
+# 6 FGW variants — torchgw family in blues, POT family in reds.
 SOLVER_COLOR = {
-    "torchgw-landmark": "#2c5aa0",  # deep blue — pure GW
-    "torchgw-fused":    "#1b8a4c",  # forest green — FGW (GPU)
-    "pot-fused":        "#c0392b",  # calm red — POT FGW (CPU baseline)
+    "torchgw-landmark":    "#1f4e8c",  # deep blue
+    "torchgw-dijkstra":    "#4a90d9",  # medium blue
+    "torchgw-precomputed": "#7cb5ec",  # light blue
+    "pot-entropic":        "#8c1a1a",  # dark red
+    "pot-exact":           "#d62728",  # medium red
+    "pot-bapg":            "#f39c7c",  # light salmon
 }
 SOLVER_LABEL = {
-    "torchgw-landmark": "torchgw · landmark (pure GW)",
-    "torchgw-fused":    "torchgw · landmark (FGW + arclen)",
-    "pot-fused":        "POT · entropic FGW (CPU)",
+    "torchgw-landmark":    "torchgw · landmark (kNN+LM geodesic)",
+    "torchgw-dijkstra":    "torchgw · dijkstra (kNN geodesic)",
+    "torchgw-precomputed": "torchgw · precomputed (Euclidean)",
+    "pot-entropic":        "POT · entropic FGW (Sinkhorn)",
+    "pot-exact":           "POT · exact FGW (conditional gradient)",
+    "pot-bapg":            "POT · BAPG FGW",
 }
-SOLVER_ORDER = ["torchgw-landmark", "torchgw-fused", "pot-fused"]
+SOLVER_ORDER = [
+    "torchgw-landmark", "torchgw-dijkstra", "torchgw-precomputed",
+    "pot-entropic", "pot-exact", "pot-bapg",
+]
 
 
 def load_records(results_dir: Path) -> list[dict]:

@@ -158,45 +158,69 @@ def test_arclens_on_branched_manifold_are_geodesic():
     assert abs(tail2_arclens.min() - fork_s) < 0.1
 
 
-# ---- solver wrappers ----------------------------------------------------
+# ---- solver wrappers (6 FGW variants) -----------------------------------
+
+EXPECTED_KEYS = {
+    "T", "gw_cost", "marginal_error", "wall_s",
+    "gpu_peak_gb", "iterations", "hyperparams", "solver_version",
+}
+
+
+def _make_small_pair():
+    X, src_arclens, _ = run.sample_branched_swiss_roll(n=60, seed=0)
+    Y, tgt_arclens, _ = run.sample_branched_spiral(n=80, seed=1)
+    return X, Y, src_arclens, tgt_arclens
+
 
 def test_run_torchgw_landmark_returns_expected_fields():
-    X, _, _ = run.sample_branched_spiral(n=60, seed=0)
-    Y, _, _ = run.sample_branched_swiss_roll(n=80, seed=1)
-    out = run.run_torchgw_landmark(X, Y, seed=0, max_iter=50, M=40, n_landmarks=30)
-    assert set(out.keys()) >= {
-        "T", "gw_cost", "marginal_error", "wall_s",
-        "gpu_peak_gb", "iterations", "hyperparams", "solver_version",
-    }
+    X, Y, src_a, tgt_a = _make_small_pair()
+    out = run.run_torchgw_landmark(X, Y, src_a, tgt_a, seed=0,
+                                     max_iter=50, M_samples=40, n_landmarks=30)
+    assert set(out.keys()) >= EXPECTED_KEYS
     assert out["T"].shape == (60, 80)
-    assert out["wall_s"] > 0
-
-
-def test_run_torchgw_fused_returns_expected_fields():
-    X, src_arclens, _ = run.sample_branched_spiral(n=60, seed=0)
-    Y, tgt_arclens, _ = run.sample_branched_swiss_roll(n=80, seed=1)
-    out = run.run_torchgw_fused(
-        X, Y, src_arclens, tgt_arclens,
-        seed=0, max_iter=50, M_samples=40, n_landmarks=30,
-    )
-    assert set(out.keys()) >= {
-        "T", "gw_cost", "marginal_error", "wall_s",
-        "gpu_peak_gb", "iterations", "hyperparams", "solver_version",
-    }
-    assert out["T"].shape == (60, 80)
+    assert out["hyperparams"]["distance_mode"] == "landmark"
     assert out["hyperparams"]["fgw_alpha"] == 0.5
 
 
-def test_run_pot_fused_returns_expected_fields():
-    X, src_arclens, _ = run.sample_branched_swiss_roll(n=60, seed=0)
-    Y, tgt_arclens, _ = run.sample_branched_spiral(n=80, seed=1)
-    out = run.run_pot_fused(
-        X, Y, src_arclens, tgt_arclens, seed=0, max_iter=80, alpha=0.5,
-    )
-    assert set(out.keys()) >= {
-        "T", "gw_cost", "marginal_error", "wall_s",
-        "gpu_peak_gb", "iterations", "hyperparams", "solver_version",
-    }
+def test_run_torchgw_dijkstra_returns_expected_fields():
+    X, Y, src_a, tgt_a = _make_small_pair()
+    out = run.run_torchgw_dijkstra(X, Y, src_a, tgt_a, seed=0,
+                                     max_iter=50, M_samples=40)
+    assert set(out.keys()) >= EXPECTED_KEYS
+    assert out["T"].shape == (60, 80)
+    assert out["hyperparams"]["distance_mode"] == "dijkstra"
+
+
+def test_run_torchgw_precomputed_returns_expected_fields():
+    X, Y, src_a, tgt_a = _make_small_pair()
+    out = run.run_torchgw_precomputed(X, Y, src_a, tgt_a, seed=0,
+                                        max_iter=50, M_samples=40)
+    assert set(out.keys()) >= EXPECTED_KEYS
+    assert out["T"].shape == (60, 80)
+    assert out["hyperparams"]["distance_mode"] == "precomputed"
+
+
+def test_run_pot_entropic_returns_expected_fields():
+    X, Y, src_a, tgt_a = _make_small_pair()
+    out = run.run_pot_entropic(X, Y, src_a, tgt_a, seed=0, max_iter=80)
+    assert set(out.keys()) >= EXPECTED_KEYS
+    assert out["T"].shape == (60, 80)
+    assert out["gpu_peak_gb"] is None
+    assert out["hyperparams"]["algorithm"] == "entropic"
+
+
+def test_run_pot_exact_returns_expected_fields():
+    X, Y, src_a, tgt_a = _make_small_pair()
+    out = run.run_pot_exact(X, Y, src_a, tgt_a, seed=0, max_iter=200)
+    assert set(out.keys()) >= EXPECTED_KEYS
+    assert out["T"].shape == (60, 80)
+    assert out["hyperparams"]["algorithm"] == "exact-CG"
+
+
+def test_run_pot_bapg_returns_expected_fields():
+    X, Y, src_a, tgt_a = _make_small_pair()
+    out = run.run_pot_bapg(X, Y, src_a, tgt_a, seed=0, max_iter=200)
+    assert set(out.keys()) >= EXPECTED_KEYS
     assert out["T"].shape == (60, 80)
     assert out["gpu_peak_gb"] is None  # POT runs on CPU
     assert out["hyperparams"]["alpha"] == 0.5

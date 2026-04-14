@@ -28,7 +28,14 @@ while [[ $# -gt 0 ]]; do
 done
 mkdir -p "$OUT"
 
-SOLVERS=("torchgw-landmark" "torchgw-fused" "pot-fused")
+SOLVERS=(
+    "torchgw-landmark"
+    "torchgw-dijkstra"
+    "torchgw-precomputed"
+    "pot-entropic"
+    "pot-exact"
+    "pot-bapg"
+)
 
 declare -A SCALES
 SCALES[400]="500"
