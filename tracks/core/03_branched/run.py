@@ -469,6 +469,8 @@ def run_torchgw_landmark(
     k: int = 5,
     n_landmarks: int = 50,
     fgw_alpha: float = 0.5,
+    min_iter_before_converge: int | None = None,
+    tol: float | None = None,
 ) -> dict:
     """torchgw.sampled_gw in landmark distance mode, FGW with arclen feature.
 
@@ -483,13 +485,18 @@ def run_torchgw_landmark(
         M_feat = _build_feature_cost(src_arclens, tgt_arclens)
         t_prep = time.perf_counter() - t_prep_start  # tiny feature cost
         t0 = time.perf_counter()
+        _extra = {}
+        if min_iter_before_converge is not None:
+            _extra["min_iter_before_converge"] = min_iter_before_converge
+        if tol is not None:
+            _extra["tol"] = tol
         T, log = sampled_gw(  # type: ignore[misc]
             X, Y,
             distance_mode="landmark", mixed_precision=True,
             M=M_samples, epsilon=epsilon, max_iter=max_iter,
             k=k, n_landmarks=n_landmarks,
             fgw_alpha=fgw_alpha, C_linear=M_feat,
-            log=True, verbose=False,
+            log=True, verbose=False, **_extra,
         )
         if use_cuda:
             torch.cuda.synchronize()
@@ -514,6 +521,8 @@ def run_torchgw_dijkstra(
     max_iter: int = 300,
     k: int = 5,
     fgw_alpha: float = 0.5,
+    min_iter_before_converge: int | None = None,
+    tol: float | None = None,
 ) -> dict:
     """torchgw.sampled_gw in dijkstra distance mode, FGW with arclen feature.
 
@@ -527,13 +536,18 @@ def run_torchgw_dijkstra(
         M_feat = _build_feature_cost(src_arclens, tgt_arclens)
         t_prep = time.perf_counter() - t_prep_start
         t0 = time.perf_counter()
+        _extra = {}
+        if min_iter_before_converge is not None:
+            _extra["min_iter_before_converge"] = min_iter_before_converge
+        if tol is not None:
+            _extra["tol"] = tol
         T, log = sampled_gw(  # type: ignore[misc]
             X, Y,
             distance_mode="dijkstra", mixed_precision=True,
             M=M_samples, epsilon=epsilon, max_iter=max_iter,
             k=k,
             fgw_alpha=fgw_alpha, C_linear=M_feat,
-            log=True, verbose=False,
+            log=True, verbose=False, **_extra,
         )
         if use_cuda:
             torch.cuda.synchronize()
@@ -557,6 +571,8 @@ def run_torchgw_precomputed(
     M_samples: int = 80,
     max_iter: int = 300,
     fgw_alpha: float = 0.5,
+    min_iter_before_converge: int | None = None,
+    tol: float | None = None,
 ) -> dict:
     """torchgw.sampled_gw with precomputed dense Euclidean distance matrices.
 
@@ -581,6 +597,11 @@ def run_torchgw_precomputed(
         t_prep = time.perf_counter() - t_prep_start
 
         t0 = time.perf_counter()
+        _extra = {}
+        if min_iter_before_converge is not None:
+            _extra["min_iter_before_converge"] = min_iter_before_converge
+        if tol is not None:
+            _extra["tol"] = tol
         T, log = sampled_gw(  # type: ignore[misc]
             X_source=X, X_target=Y, p=p, q=q,
             distance_mode="precomputed",
@@ -588,7 +609,7 @@ def run_torchgw_precomputed(
             mixed_precision=True,
             M=M_samples, epsilon=epsilon, max_iter=max_iter,
             fgw_alpha=fgw_alpha, C_linear=M_feat,
-            log=True, verbose=False,
+            log=True, verbose=False, **_extra,
         )
         if use_cuda:
             torch.cuda.synchronize()
@@ -729,14 +750,14 @@ def _run_pot_variant(
 def _make_pot_entropic(backend: str):
     import ot.gromov as otgw
     def fn(X, Y, src_arclens, tgt_arclens, seed=0,
-            epsilon=5e-3, max_iter=50, alpha=0.5):
+            epsilon=5e-3, max_iter=50, alpha=0.5, tol=1e-9):
         return _run_pot_variant(
             X, Y, src_arclens, tgt_arclens, seed, backend,
             otgw.entropic_fused_gromov_wasserstein,
             dict(loss_fun="square_loss", epsilon=epsilon, alpha=alpha,
-                  max_iter=max_iter, tol=1e-9, log=True, verbose=False),
+                  max_iter=max_iter, tol=tol, log=True, verbose=False),
             {"epsilon": epsilon, "max_iter": max_iter, "alpha": alpha,
-             "loss_fun": "square_loss", "algorithm": "entropic"},
+             "tol": tol, "loss_fun": "square_loss", "algorithm": "entropic"},
         )
     return fn
 
@@ -809,6 +830,15 @@ def main() -> None:
                     help="Length of tail 2 (splayed branch); must be < tail1-len")
     ap.add_argument("--tail2-angle", type=float, default=float(np.pi / 6),
                     help="Angle (rad) between tail 2 and tail 1; default 30°")
+    ap.add_argument("--max-iter", type=int, default=None,
+                    help="Override solver max_iter (anytime Pareto sweep).")
+    ap.add_argument("--force-full", action="store_true",
+                    help="Disable early stop: run exactly max_iter iterations "
+                         "(torchgw: min_iter_before_converge=max_iter, tol=0; "
+                         "POT: tol=0).")
+    ap.add_argument("--tag", type=str, default=None,
+                    help="Optional tag appended to output filename "
+                         "(e.g. 'iter50' to separate anytime sweep runs).")
     args = ap.parse_args()
 
     rec = build_record(
@@ -830,10 +860,11 @@ def main() -> None:
         "tail2_angle": args.tail2_angle,
     }
 
+    _tag_part = f"__{args.tag}" if args.tag else ""
     out_path = args.out / (
         f"core_03_branched__{args.solver}"
         f"__n{args.n_source}k{args.n_target}"
-        f"__seed{args.seed}.json"
+        f"__seed{args.seed}{_tag_part}.json"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -883,7 +914,21 @@ def main() -> None:
         fn = solver_fns.get(args.solver)
         if fn is None:
             raise ValueError(f"unknown solver: {args.solver}")
-        result = fn(X, Y, src_arclens, tgt_arclens, seed=args.seed)
+
+        # Anytime-sweep kwargs: --max-iter overrides per-solver default;
+        # --force-full disables early-stop paths.
+        extra_kwargs: dict = {}
+        if args.max_iter is not None:
+            extra_kwargs["max_iter"] = args.max_iter
+        if args.force_full:
+            mi = args.max_iter if args.max_iter is not None else 500
+            if args.solver.startswith("torchgw"):
+                extra_kwargs["min_iter_before_converge"] = mi
+                extra_kwargs["tol"] = 0.0
+            else:
+                extra_kwargs["tol"] = 0.0
+        result = fn(X, Y, src_arclens, tgt_arclens,
+                     seed=args.seed, **extra_kwargs)
 
         rec["hyperparams"] = result["hyperparams"]
         rec["solver_version"] = result["solver_version"]
