@@ -641,26 +641,30 @@ def _pot_common_setup_cpu(X: np.ndarray, Y: np.ndarray,
 
 def _pot_common_setup_gpu(X: np.ndarray, Y: np.ndarray,
                             src_arclens: np.ndarray, tgt_arclens: np.ndarray,
-                            seed: int):
+                            seed: int, dtype: str = "float32"):
     """Build (C1, C2, M_feat, p, q) as torch tensors on GPU for POT's
     torch backend. POT auto-dispatches to GPU when tensors are on CUDA.
+
+    dtype: "float32" (default) or "float64". BAPG's Bregman projections
+    can blow up numerically with small epsilon at float32; float64 matches
+    the CPU (numpy) code path and keeps the solver stable at extra memory
+    and compute cost.
     """
     import torch
     device = torch.device("cuda")
-    X_t = torch.as_tensor(X, device=device, dtype=torch.float32)
-    Y_t = torch.as_tensor(Y, device=device, dtype=torch.float32)
+    tdtype = torch.float64 if dtype == "float64" else torch.float32
+    X_t = torch.as_tensor(X, device=device, dtype=tdtype)
+    Y_t = torch.as_tensor(Y, device=device, dtype=tdtype)
     C1 = torch.cdist(X_t, X_t) ** 2
     C2 = torch.cdist(Y_t, Y_t) ** 2
     C1 /= (C1.max() + 1e-12)
     C2 /= (C2.max() + 1e-12)
-    F_src = torch.as_tensor(src_arclens, device=device, dtype=torch.float32).unsqueeze(1)
-    F_tgt = torch.as_tensor(tgt_arclens, device=device, dtype=torch.float32).unsqueeze(1)
+    F_src = torch.as_tensor(src_arclens, device=device, dtype=tdtype).unsqueeze(1)
+    F_tgt = torch.as_tensor(tgt_arclens, device=device, dtype=tdtype).unsqueeze(1)
     M_feat = torch.cdist(F_src, F_tgt) ** 2
     M_feat /= (M_feat.max() + 1e-12)
-    p = torch.full((X.shape[0],), 1.0 / X.shape[0],
-                    device=device, dtype=torch.float32)
-    q = torch.full((Y.shape[0],), 1.0 / Y.shape[0],
-                    device=device, dtype=torch.float32)
+    p = torch.full((X.shape[0],), 1.0 / X.shape[0], device=device, dtype=tdtype)
+    q = torch.full((Y.shape[0],), 1.0 / Y.shape[0], device=device, dtype=tdtype)
     torch.manual_seed(seed)
     np.random.seed(seed)
     return C1, C2, M_feat, p, q
@@ -712,10 +716,12 @@ def _finalize_pot(T_and_log, meta: dict, hyperparams: dict) -> dict:
 
 def _run_pot_variant(
     X, Y, src_arclens, tgt_arclens, seed, backend: str,
-    algo_fn, algo_kwargs, hyperparams,
+    algo_fn, algo_kwargs, hyperparams, gpu_dtype: str = "float32",
 ):
     """Shared driver for the six POT variants. `backend` is 'cpu' or 'gpu'.
     `algo_fn` is the POT FGW function; `algo_kwargs` goes through.
+    `gpu_dtype` controls tensor precision for the GPU backend (default
+    float32; BAPG-GPU uses float64 for numerical stability).
     """
     assert backend in ("cpu", "gpu")
     import torch
@@ -728,7 +734,7 @@ def _run_pot_variant(
         t_prep_start = time.perf_counter()
         if backend == "gpu":
             C1, C2, M_feat, p, q = _pot_common_setup_gpu(
-                X, Y, src_arclens, tgt_arclens, seed)
+                X, Y, src_arclens, tgt_arclens, seed, dtype=gpu_dtype)
         else:
             C1, C2, M_feat, p, q = _pot_common_setup_cpu(
                 X, Y, src_arclens, tgt_arclens, seed)
@@ -781,13 +787,18 @@ def _make_pot_bapg(backend: str):
     import ot.gromov as otgw
     def fn(X, Y, src_arclens, tgt_arclens, seed=0,
             epsilon=5e-3, max_iter=50, alpha=0.5, tol=1e-6):
+        # BAPG's Bregman projection is numerically fragile at small
+        # epsilon; use float64 on GPU to match the CPU code path.
+        gpu_dtype = "float64" if backend == "gpu" else "float32"
         return _run_pot_variant(
             X, Y, src_arclens, tgt_arclens, seed, backend,
             otgw.BAPG_fused_gromov_wasserstein,
             dict(loss_fun="square_loss", epsilon=epsilon, alpha=alpha,
                   max_iter=max_iter, tol=tol, log=True, verbose=False),
             {"epsilon": epsilon, "max_iter": max_iter, "alpha": alpha,
-             "tol": tol, "loss_fun": "square_loss", "algorithm": "BAPG"},
+             "tol": tol, "loss_fun": "square_loss", "algorithm": "BAPG",
+             "gpu_dtype": gpu_dtype},
+            gpu_dtype=gpu_dtype,
         )
     return fn
 
