@@ -516,6 +516,8 @@ def main() -> None:
     ap.add_argument("--max-iter", type=int, default=None)
     ap.add_argument("--force-full", action="store_true")
     ap.add_argument("--tag", type=str, default=None)
+    ap.add_argument("--k", type=int, default=None,
+                    help="kNN k for torchgw-landmark/dijkstra geodesic graph")
     args = ap.parse_args()
 
     src_name, tgt_name = args.pair.split(",")
@@ -555,6 +557,8 @@ def main() -> None:
         extra_kwargs: dict = {}
         if args.max_iter is not None:
             extra_kwargs["max_iter"] = args.max_iter
+        if args.k is not None and args.solver in ("torchgw-landmark", "torchgw-dijkstra"):
+            extra_kwargs["k"] = args.k
         if args.force_full:
             mi = args.max_iter if args.max_iter is not None else 500
             if args.solver.startswith("torchgw"):
