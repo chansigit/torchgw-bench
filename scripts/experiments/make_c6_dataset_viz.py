@@ -55,13 +55,13 @@ def _camera(ax, cls: str, V: np.ndarray) -> None:
 
 
 def _proj_to_display(ax, V: np.ndarray) -> np.ndarray:
-    """Project 3D world coords to 2D display pixel coords."""
-    M = ax.get_proj()
-    homo = np.hstack([V, np.ones((V.shape[0], 1))])
-    proj = (M @ homo.T).T
-    x = proj[:, 0] / proj[:, 3]
-    y = proj[:, 1] / proj[:, 3]
-    return np.column_stack([ax.transData.transform(np.column_stack([x, y]))])
+    """Project 3D world coords to 2D display pixel coords using
+    mpl_toolkits.mplot3d.proj3d (the canonical path matplotlib uses
+    internally for scatter3d)."""
+    from mpl_toolkits.mplot3d import proj3d
+    xs, ys, _zs = proj3d.proj_transform(V[:, 0], V[:, 1], V[:, 2],
+                                           ax.get_proj())
+    return ax.transData.transform(np.column_stack([xs, ys]))
 
 
 def main():
