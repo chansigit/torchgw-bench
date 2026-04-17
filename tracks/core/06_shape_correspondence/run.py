@@ -78,7 +78,10 @@ def load_off(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 def load_taco_pair(src: str, tgt: str, data_root: Path = DATA_ROOT):
     """Load a TACO (src, tgt) pair. Ground truth Pi is 1-indexed in the
-    .mat file; we return 0-indexed gt[i_src] = i_tgt_full."""
+    .mat file; we return 0-indexed gt[i_src] = i_tgt_full. Because TACO
+    meshes have different connectivities, the inverse-mapping case (only
+    the reverse GT exists) may leave some source vertices without a GT;
+    those are marked -1 in gt and must be filtered by the caller."""
     from scipy.io import loadmat
     V_src, F_src = load_off(data_root / "offs" / f"{src}.off")
     V_tgt, F_tgt = load_off(data_root / "offs" / f"{tgt}.off")
@@ -88,10 +91,12 @@ def load_taco_pair(src: str, tgt: str, data_root: Path = DATA_ROOT):
         gt = loadmat(fwd)["Pi"].ravel().astype(np.int64) - 1
     elif rev.exists():
         gt_inv = loadmat(rev)["Pi"].ravel().astype(np.int64) - 1
-        # invert: if Pi_inv[j] = i means tgt vertex j maps to src vertex i,
-        # then gt[i] = j.
-        gt = np.empty(V_src.shape[0], dtype=np.int64)
-        gt[gt_inv] = np.arange(len(gt_inv))
+        # Pi_inv[j_tgt] = i_src (1-indexed - 1). Invert: for each unique
+        # src index hit, record the first target that mapped to it.
+        gt = np.full(V_src.shape[0], -1, dtype=np.int64)
+        for j_tgt, i_src in enumerate(gt_inv):
+            if 0 <= i_src < V_src.shape[0] and gt[i_src] == -1:
+                gt[i_src] = j_tgt
     else:
         raise FileNotFoundError(f"no gt for pair {src}-{tgt}")
     return V_src, F_src, V_tgt, F_tgt, gt
