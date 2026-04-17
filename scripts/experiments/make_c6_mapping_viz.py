@@ -71,7 +71,7 @@ def _proj(ax, V: np.ndarray) -> np.ndarray:
 def main():
     methods = [
         ("GT (oracle)", "gt"),
-        ("torchgw-dijkstra", "torchgw"),
+        ("torchgw-dijkstra (ε=5e-2)", "torchgw"),
         ("pot-exact-gpu", "pot"),
     ]
 
@@ -88,7 +88,8 @@ def main():
             N_VERTS, N_VERTS, seed=0,
         )
         # Solve
-        out_tg = run.run_torchgw_dijkstra(V_src, V_tgt, seed=0, max_iter=300)
+        out_tg = run.run_torchgw_dijkstra(V_src, V_tgt, seed=0,
+                                            epsilon=5e-2, max_iter=300)
         out_pot = run.run_pot_exact_gpu(V_src, V_tgt, seed=0, max_iter=500)
         T_tg = out_tg["T"]
         T_pot = out_pot["T"]
