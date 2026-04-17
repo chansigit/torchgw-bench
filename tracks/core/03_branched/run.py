@@ -850,6 +850,9 @@ def main() -> None:
     ap.add_argument("--tag", type=str, default=None,
                     help="Optional tag appended to output filename "
                          "(e.g. 'iter50' to separate anytime sweep runs).")
+    ap.add_argument("--epsilon", type=float, default=None,
+                    help="Override entropic regularisation strength for "
+                         "solvers that use it (entropic FGW, BAPG, torchgw).")
     args = ap.parse_args()
 
     rec = build_record(
@@ -931,6 +934,8 @@ def main() -> None:
         extra_kwargs: dict = {}
         if args.max_iter is not None:
             extra_kwargs["max_iter"] = args.max_iter
+        if args.epsilon is not None and args.solver != "pot-exact" and args.solver != "pot-exact-gpu":
+            extra_kwargs["epsilon"] = args.epsilon
         if args.force_full:
             mi = args.max_iter if args.max_iter is not None else 500
             if args.solver.startswith("torchgw"):
