@@ -16,6 +16,22 @@ geodesic arc length from the spiral start, used as the FGW linear cost.
 
 ## Experiment index
 
+## C6 — TACO shape correspondence (`core/06_shape_correspondence`)
+
+### [v1 benchmark (2026-04-16)](2026-04-16-c6-shape.md)
+
+Pure GW matching between same-class TACO meshes in different poses. 5
+GPU solvers across 18 pairs. **Opposite conclusion from the Y-fork
+track**: POT-exact dominates torchgw on accuracy by ~2× because the
+sampled-GW design produces diffuse transport plans that fail argmax-
+based shape correspondence.
+
+**Figure:** [`c6_shape_benchmark.png`](../figures/c6_shape_benchmark.png).
+
+---
+
+## C3 — Y-fork branched spiral / Swiss roll (`core/03_branched`)
+
 ### 1. [Symmetry-breaking schematic (2026-04-12)](2026-04-12-symmetry-breaking.md)
 
 Why the Y-fork matters: symmetric spirals have GW orientation ambiguity (two
