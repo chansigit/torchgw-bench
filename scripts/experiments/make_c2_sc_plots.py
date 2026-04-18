@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
-SC_DIR = REPO / "results" / "c2_sc_lda"   # LDA preprocessing is canonical
+SC_DIR = REPO / "results" / "c2_sc_cistopic"   # cisTopic = canonical SCOT-matching
 EPS_DIR = REPO / "results" / "c2_eps"
 FIG_DIR = REPO / "docs" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)

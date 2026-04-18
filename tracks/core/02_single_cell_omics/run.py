@@ -145,20 +145,14 @@ def preprocess_atac_lsi(adata, n_top_peaks: int = 10000, n_comps: int = 50):
 
 def preprocess_atac_lda(adata, n_top_peaks: int = 10000, n_topics: int = 50,
                           max_iter: int = 20):
-    """LDA topic modelling: top peaks → binarise → LDA(n_topics).
-
-    Cells become mixtures over discrete topics; the per-cell topic vector
-    is the embedding. Matches SCOT+ / cisTopic-style ATAC preprocessing —
-    topics capture biologically coherent co-accessible peak sets instead
-    of depth / variance axes that SVD picks up."""
+    """sklearn LDA (online VB): top peaks → binarise → LDA(n_topics).
+    Fast but lower-quality topics than cisTopic. Kept for ablation."""
     import scipy.sparse as sp
     from sklearn.decomposition import LatentDirichletAllocation
     ad = _select_top_peaks(adata, n_top_peaks)
     X = ad.X
     if not sp.issparse(X):
         X = sp.csr_matrix(X)
-    # Binarise (peak open/closed). sklearn LDA accepts counts but binary
-    # is closer to what cisTopic / SCOT+ do for ATAC.
     X_bin = (X > 0).astype(np.float32)
     print(f"[C2]   fitting LDA(n_topics={n_topics}, max_iter={max_iter}) on "
            f"{X_bin.shape} binarised matrix...", flush=True)
@@ -171,8 +165,59 @@ def preprocess_atac_lda(adata, n_top_peaks: int = 10000, n_topics: int = 50,
     return emb.astype(np.float32)
 
 
+def preprocess_atac_cistopic(adata, n_top_peaks: int = 10000,
+                                n_topics: int = 50, n_iter: int = 500,
+                                n_cores: int = 4):
+    """cisTopic LDA (collapsed Gibbs sampling). Matches SCOT+ exactly.
+
+    Calls an external R subprocess in the `cistopic` micromamba env to
+    fit cisTopic, reads the resulting cells × topics probability matrix
+    back into numpy. The R side uses cisTopic's `runCGSModels` then
+    `modelMatSelection` to pull the cell topic proportions."""
+    import subprocess
+    import tempfile
+    import scipy.sparse as sp
+    from scipy.io import mmwrite
+
+    ad = _select_top_peaks(adata, n_top_peaks)
+    X = ad.X
+    if not sp.issparse(X):
+        X = sp.csr_matrix(X)
+    X_bin = (X > 0).astype(np.int32)             # cells x peaks
+    peak_ids = ad.var.index.tolist()             # chr:start-end
+    X_pc = X_bin.T.tocsr()                       # peaks x cells for cisTopic
+
+    with tempfile.TemporaryDirectory(prefix="cistopic_") as td:
+        mtx_path = Path(td) / "input.mtx"
+        peaks_path = Path(td) / "peak_ids.txt"
+        csv_path = Path(td) / "output.csv"
+        mmwrite(str(mtx_path), X_pc)
+        peaks_path.write_text("\n".join(peak_ids))
+
+        script = TRACK_ROOT / "cistopic_lda.R"
+        cmd = [
+            "micromamba", "run", "-n", "cistopic",
+            "Rscript", str(script),
+            str(mtx_path), str(peaks_path), str(csv_path),
+            str(n_topics), str(n_iter), str(n_cores),
+        ]
+        print(f"[C2]   invoking cisTopic R subprocess "
+               f"(n_topics={n_topics}, n_iter={n_iter}, n_cores={n_cores})...",
+               flush=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        for line in proc.stdout.splitlines():
+            if "[cisTopic.R]" in line:
+                print(line, flush=True)
+        if proc.returncode != 0:
+            print("--- stderr ---")
+            print(proc.stderr[-2000:])
+            raise RuntimeError("cisTopic R subprocess failed")
+        emb = np.loadtxt(csv_path, delimiter=",", dtype=np.float32)
+    return emb
+
+
 def preprocess_atac(adata, n_top_peaks: int = 10000, n_comps: int = 50,
-                      method: str = "lda"):
+                      method: str = "cistopic"):
     """Dispatch to the chosen ATAC preprocessing path."""
     if method == "lsi":
         return preprocess_atac_lsi(adata, n_top_peaks=n_top_peaks,
@@ -180,6 +225,9 @@ def preprocess_atac(adata, n_top_peaks: int = 10000, n_comps: int = 50,
     elif method == "lda":
         return preprocess_atac_lda(adata, n_top_peaks=n_top_peaks,
                                       n_topics=n_comps)
+    elif method == "cistopic":
+        return preprocess_atac_cistopic(adata, n_top_peaks=n_top_peaks,
+                                          n_topics=n_comps)
     else:
         raise ValueError(f"unknown atac method: {method}")
 
@@ -578,9 +626,12 @@ def main() -> None:
     ap.add_argument("--epsilon", type=float, default=None)
     ap.add_argument("--max-iter", type=int, default=None)
     ap.add_argument("--tag", type=str, default=None)
-    ap.add_argument("--atac-method", choices=["lsi", "lda"], default="lda",
+    ap.add_argument("--atac-method", choices=["lsi", "lda", "cistopic"],
+                    default="cistopic",
                     help="ATAC embedding: 'lsi' = TF-IDF + truncated SVD, "
-                         "'lda' = topic modelling (cisTopic-style, default)")
+                         "'lda' = sklearn online LDA (fast but lower quality), "
+                         "'cistopic' = cisTopic collapsed-Gibbs LDA via R "
+                         "subprocess (default, matches SCOT+)")
     args = ap.parse_args()
 
     rec = build_record("core/02_single_cell_omics", args.solver, args.seed, "full")
