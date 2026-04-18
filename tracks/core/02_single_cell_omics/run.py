@@ -7,6 +7,27 @@ preprocess each independently, and ask: given only the within-modality
 similarity structures (no shared features), can GW recover the
 cross-modality correspondence?
 
+Pipeline design choices (informed by SCOT, Demetci 2022 and diagnostic
+sweeps on this dataset):
+
+  * RNA: scanpy's HVG → scale → PCA(50).
+  * ATAC: variance-top peaks → TF-IDF → truncated SVD(50), drop first
+    component (depth-correlated).
+  * **L2-normalise** each embedding row — so Euclidean kNN ≈ correlation
+    kNN for neighbour selection.
+  * Structural cost: **binary kNN connectivity** graph (not weighted
+    Euclidean). Dijkstra on binary adjacency yields **hop-count
+    geodesic** — empirically ~3× better FOSCTTM than weighted Euclidean
+    geodesic (0.27 vs 0.71 at N=1000). Weighted-edge geodesics on
+    L2-normalised 50-dim vectors have too little spread to be
+    informative.
+  * Consequence: torchgw's internal `landmark` / `dijkstra` distance
+    modes — which compute *weighted* Euclidean geodesics from the input
+    coordinates — produce FOSCTTM > 0.5 (anti-correlated) on this data.
+    They remain in the benchmark as a cautionary comparison. The only
+    torchgw configuration that works here is `precomputed` mode fed
+    with a SCOT-style cost matrix.
+
 Ground truth is the identity permutation (cell i in RNA is the same
 cell as cell i in ATAC). This is the standard evaluation protocol
 from SCOT (Demetci 2020), UnionCom (Cao 2020), and Pamona (Cao 2022).
@@ -256,25 +277,40 @@ def _build_metrics(wall_preprocess, wall_solve, ram_peak_bytes, use_cuda):
     }
 
 
-# ---- geodesic on subsampled point cloud --------------------------------
+# ---- structural cost (SCOT-style by default) ---------------------------
 
-def knn_geodesic_matrix(V: np.ndarray, k: int = 10) -> np.ndarray:
-    from sklearn.neighbors import NearestNeighbors
-    from scipy.sparse import csr_matrix
+def l2_normalize(V: np.ndarray) -> np.ndarray:
+    """L2-normalise rows of V. SCOT's default input preprocessing."""
+    n = np.linalg.norm(V, axis=1, keepdims=True) + 1e-12
+    return (V / n).astype(np.float32)
+
+
+def knn_geodesic_matrix(V: np.ndarray, k: int | None = None,
+                          metric: str = "correlation",
+                          mode: str = "connectivity") -> np.ndarray:
+    """SCOT-style structural cost. Build a kNN graph with the chosen
+    metric (default Pearson correlation) in connectivity mode (binary
+    0/1 adjacency) or distance mode (weighted edges). Dijkstra on that
+    graph gives a geodesic distance matrix (hop-counts for connectivity,
+    real distance for distance mode). Final matrix is max-normalised to
+    [0, 1].
+
+    Defaults match SCOT.align() (metric='correlation', mode='connectivity',
+    k capped at min(0.2 * n, 50)).
+    """
+    from sklearn.neighbors import kneighbors_graph
     from scipy.sparse.csgraph import shortest_path
-    nn = NearestNeighbors(n_neighbors=k + 1).fit(V)
-    dists, idx = nn.kneighbors(V)
     n = V.shape[0]
-    rows = np.repeat(np.arange(n), k)
-    cols = idx[:, 1:].ravel()
-    data = dists[:, 1:].ravel().astype(np.float64)
-    G = csr_matrix((data, (rows, cols)), shape=(n, n))
-    G = G.maximum(G.T)
+    if k is None:
+        k = min(max(int(0.2 * n), 5), 50)
+    G = kneighbors_graph(V, n_neighbors=k, metric=metric, mode=mode,
+                          include_self=False)
+    G = G.maximum(G.T)                               # symmetrise
     D = shortest_path(G, method="D", directed=False)
     if not np.all(np.isfinite(D)):
         finite_max = D[np.isfinite(D)].max()
         D[~np.isfinite(D)] = 2.0 * finite_max
-    return D.astype(np.float32)
+    return (D / (D.max() + 1e-12)).astype(np.float32)
 
 
 # ---- torchgw solver wrappers (pure GW) ----------------------------------
@@ -520,17 +556,27 @@ def main() -> None:
             raise FileNotFoundError(
                 f"dataset not found at {h5}; run tracks/core/02_single_cell_omics/fetch.sh first"
             )
-        print(f"[C2] loading multiome from {h5}", flush=True)
-        adata_rna, adata_atac = load_multiome(h5)
-        print(f"[C2] RNA shape  {adata_rna.shape}", flush=True)
-        print(f"[C2] ATAC shape {adata_atac.shape}", flush=True)
-
-        V_rna_full = preprocess_rna(adata_rna, n_comps=args.n_comps)
-        V_atac_full = preprocess_atac(adata_atac, n_comps=args.n_comps)
+        cache = DATA_ROOT / f"embeddings_n_comps{args.n_comps}.npz"
+        if cache.exists():
+            print(f"[C2] loading cached embeddings {cache.name}", flush=True)
+            z = np.load(cache)
+            V_rna_full, V_atac_full = z["V_rna"], z["V_atac"]
+        else:
+            print(f"[C2] loading multiome from {h5}", flush=True)
+            adata_rna, adata_atac = load_multiome(h5)
+            print(f"[C2] RNA shape  {adata_rna.shape}", flush=True)
+            print(f"[C2] ATAC shape {adata_atac.shape}", flush=True)
+            V_rna_full = preprocess_rna(adata_rna, n_comps=args.n_comps)
+            V_atac_full = preprocess_atac(adata_atac, n_comps=args.n_comps)
+            np.savez(cache, V_rna=V_rna_full, V_atac=V_atac_full)
+            print(f"[C2] cached embeddings → {cache.name}", flush=True)
         assert V_rna_full.shape[0] == V_atac_full.shape[0]
         V_rna, V_atac, idx = subsample_cells(V_rna_full, V_atac_full,
                                                 args.n_cells, args.seed)
-        print(f"[C2] subsampled to n={V_rna.shape[0]}", flush=True)
+        # SCOT-style input: L2-normalise each modality before alignment.
+        V_rna = l2_normalize(V_rna)
+        V_atac = l2_normalize(V_atac)
+        print(f"[C2] subsampled to n={V_rna.shape[0]} (l2-normalised)", flush=True)
 
         solver_fns = {
             "torchgw-landmark":    run_torchgw_landmark,
