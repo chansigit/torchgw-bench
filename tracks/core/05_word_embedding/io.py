@@ -26,16 +26,29 @@ def read_fasttext(path: str, N: int) -> tuple[list[str], np.ndarray]:
     words: list[str] = []
     rows: list[np.ndarray] = []
 
+    expected_dim: int | None = None
+
     with open(path, "r", encoding="utf-8") as fh:
         # First line is the header: "<vocab> <dim>"
-        _ = fh.readline()
+        header = fh.readline().strip()
+        if header:
+            try:
+                _, dim_str = header.split()
+                expected_dim = int(dim_str)
+            except ValueError:
+                pass  # non-standard header — infer dim from first data line
+
         for line in fh:
-            line = line.rstrip("\n")
+            line = line.strip()
             if not line:
                 continue
-            parts = line.split(" ")
+            parts = line.split()  # split on any whitespace; handles trailing spaces
+            vec_parts = parts[1:]
+            if expected_dim is not None and len(vec_parts) != expected_dim:
+                # Malformed line (e.g. truncated word + continuation float) — skip
+                continue
             words.append(parts[0])
-            rows.append(np.array(parts[1:], dtype=np.float32))
+            rows.append(np.array(vec_parts, dtype=np.float32))
             if len(words) == N:
                 break
 
