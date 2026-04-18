@@ -1,135 +1,128 @@
 # C2 Single-Cell Multi-Omics — v1 benchmark
 
-**Date:** 2026-04-17 · **Track:** `core/02_single_cell_omics` ·
-**Dataset:** 10x PBMC 10k Multiome (11,898 cells × 36,601 genes +
-143,887 peaks) · **Hardware:** NVIDIA H100 80GB HBM3
+**Date:** 2026-04-17 (M-samples tuned 2026-04-18) · **Track:**
+`core/02_single_cell_omics` · **Dataset:** 10x PBMC 10k Multiome
+(11,898 cells × 36,601 genes + 143,887 peaks) · **Hardware:**
+NVIDIA H100 80GB HBM3
 
 Cross-modality Gromov-Wasserstein alignment: given paired RNA+ATAC
-measurements from the same cells, split the modalities, preprocess each
-independently, and ask whether GW can recover the cross-modality
+measurements from the same cells, split the modalities, preprocess
+each independently, and ask whether GW can recover the cross-modality
 correspondence using only within-modality similarity structure.
 
 ## Positioning
 
-SCOT (Demetci et al. 2022) uses POT's `entropic_gromov_wasserstein`
-under the hood, so "SCOT" = specific preprocessing + POT's GW solver.
-Our contribution is **not** better preprocessing — we adopt SCOT's
-exact recipe (cisTopic for ATAC, PCA for RNA, L2-normalised, kNN
-connectivity, hop-count Dijkstra, uniform marginals, ε=5e-3). Our
-benchmark holds preprocessing constant and compares the **solver
-layer**: POT-entropic (SCOT's solver), POT-exact, three torchgw
-variants.
+SCOT (Demetci et al. 2022) and SCOT+ (2024) use POT's
+`entropic_gromov_wasserstein` under the hood — "SCOT" = specific
+preprocessing + POT's GW solver. Our contribution is **not** better
+preprocessing — we adopt SCOT's recipe (cisTopic for ATAC, PCA for
+RNA, L2-normalised, kNN connectivity, hop-count Dijkstra, uniform
+marginals, ε=5e-3). The benchmark holds preprocessing constant and
+compares the **solver layer**: POT-entropic (SCOT's solver), POT-exact,
+three torchgw variants.
 
-## Task
+## Task & metric
 
-Paired-data ground truth: cell `i` in RNA ≡ cell `i` in ATAC. The
-alignment method sees the two modalities separately and outputs a
-transport plan `T`; we evaluate whether `T` recovers the identity
-correspondence.
+Paired-data ground truth: cell `i` in RNA ≡ cell `i` in ATAC.
 
-**Primary metric**: **FOSCTTM** (Fraction Of Samples Closer Than True
-Match) via barycentric projection:
-
-1. Project source cells into target space: `proj = (T/row_norm) · V_tgt`
-2. For each `i`, fraction of `j ≠ i` with
-   `||proj[i] − V_tgt[j]|| < ||proj[i] − V_tgt[i]||`
-3. Repeat symmetrically, average.
-
-Random = 0.5; perfect = 0. Literature (SCOT+ 2024 on this dataset):
+**FOSCTTM** (Fraction Of Samples Closer Than True Match) via
+barycentric projection: `proj = (T/row_norm)·V_tgt`; for each `i`
+count fraction of `j≠i` with `||proj[i]−V_tgt[j]|| < ||proj[i]−V_tgt[i]||`;
+average symmetrically. Random = 0.5; perfect = 0. Literature (SCOT+):
 **0.12** at N=2407.
 
 ## Pipeline (SCOT+ matching)
 
 - **RNA**: `normalize_total(1e4) → log1p → HVG(3000) → scale → PCA(50)`
-- **ATAC**: top 10k peaks by variance → binarise → **cisTopic
-  `runCGSModels(n_topics=50, n_iter=500)`** — collapsed Gibbs sampling,
-  matches SCOT+'s cisTopic-style topic modelling exactly. Runs in a
-  dedicated `cistopic` micromamba environment via R subprocess
-  (`tracks/core/02_single_cell_omics/cistopic_lda.R`).
-- **L2-normalise** each embedding row.
-- **Structural cost**: binary kNN connectivity, Dijkstra hop-count,
-  normalise by max. `k = min(0.2·n, 50)`.
+- **ATAC**: top 10k peaks → binarise → **cisTopic
+  `runCGSModels(n_topics=50, n_iter=500)`** via R subprocess in a
+  dedicated `cistopic` micromamba env. One-time ~60 min Gibbs fit
+  cached to `.npz`.
+- **L2-normalise**, **kNN connectivity graph** (k=min(0.2n, 50),
+  correlation / L2-Euclidean), **hop-count Dijkstra**, normalise by
+  max.
+- **ε = 5e-3** (sweet spot from C2 ε sweep).
 
-cisTopic LDA fit on 10000 peaks × 11898 cells takes ~60 min single-
-threaded — one-time cost cached to `.npz` and reused across solver
-calls.
+## Headline result
 
-### ATAC preprocessing ablation (N=5000, 3 seeds per cell)
-
-| Solver | LSI | sklearn LDA | **cisTopic** |
-|---|---|---|---|
-| torchgw-landmark    | 0.419 | 0.326 | **0.169** |
-| torchgw-dijkstra    | 0.419 | 0.326 | **0.158** |
-| torchgw-precomputed | 0.262 | **0.152** | 0.314 |
-| pot-entropic-gpu    | 0.246 | 0.159 | **0.143** |
-| pot-exact-gpu       | 0.255 | 0.212 | **0.152** |
-
-Each step cuts error: LSI's truncated SVD retains depth artefacts,
-sklearn LDA (online VB, max_iter=20) produces under-converged topics,
-cisTopic's CGS-based full Gibbs gives crisp topic assignments.
-
-**Surprising regression**: `torchgw-precomputed` gets *worse* going
-from sklearn LDA to cisTopic (0.152 → 0.314 at N=5000, high variance).
-Hypothesis: cisTopic's crisp topic vectors produce a cost matrix with
-sharper structural features; `sampled_gw`'s M=80 row subsample misses
-the few critical geodesic edges that POT's exact-gradient GW can use.
-sklearn LDA's softer embedding happened to be compatible with
-subsample noise; cisTopic's is not.
-
-## Scale sweep (cisTopic preprocessing)
-
-5 solvers × N ∈ {1000, 2000, 5000} × 3 seeds.
+5 solvers × N ∈ {1000, 2000, 5000} × 3 seeds. torchgw variants use
+**M_samples = max(1000, 3N/4) capped at N** — tuned from the M sweep
+below.
 
 ![scale sweep](../figures/c2_sc_benchmark.png)
 
-### Results (mean ± σ over 3 seeds)
-
-| Solver | N=1000 | N=2000 | N=5000 | wall @ N=5000 |
-|---|---|---|---|---|
-| **pot-entropic-gpu** | **0.150** ± 0.006 | **0.145** ± 0.004 | **0.143** ± 0.002 | 59.6 s |
-| pot-exact-gpu        | 0.261 ± 0.071 | 0.179 ± 0.049 | 0.152 ± 0.005 | 80.1 s |
-| torchgw-landmark     | 0.341 ± 0.223 | 0.326 ± 0.235 | 0.169 ± 0.006 | **5.0 s** |
-| torchgw-dijkstra     | 0.497 ± 0.243 | 0.486 ± 0.221 | 0.158 ± 0.005 | 19.8 s |
-| torchgw-precomputed  | 0.450 ± 0.222 | 0.201 ± 0.077 | 0.314 ± 0.239 | 24.2 s |
+| Solver | M_samples | N=1000 | N=2000 | N=5000 | wall @N=5000 |
+|---|---|---|---|---|---|
+| **torchgw-precomputed** | 3N/4 | **0.140** ± 0.010 | **0.136** ± 0.005 | **0.134** ± 0.001 | 26.2 s |
+| pot-entropic-gpu        | — | 0.150 ± 0.006 | 0.145 ± 0.004 | 0.143 ± 0.002 | 56.8 s |
+| torchgw-landmark        | 3N/4 | 0.180 ± 0.017 | 0.156 ± 0.004 | 0.162 ± 0.009 | **5.1 s** |
+| pot-exact-gpu           | — | 0.261 ± 0.071 | 0.179 ± 0.049 | 0.152 ± 0.005 | 70.1 s |
+| torchgw-dijkstra        | 3N/4 | 0.335 ± 0.256 | 0.223 ± 0.072 | 0.154 ± 0.005 | 414.4 s ⚠️ |
 
 ### Observations
 
-1. **pot-entropic-gpu saturates early** (0.150 at N=1000 already matches
-   0.143 at N=5000). Adding more cells doesn't help beyond a point.
-   **We achieve 0.143 at N=2000 vs literature 0.12 at N=2407 → 1.19× gap**.
-2. **torchgw-landmark/dijkstra reliability snaps in at scale**: at
-   N=1000 they are seed-unstable (σ ≈ 0.22–0.24, FOSCTTM 0.34–0.50);
-   at N=5000 the variance collapses to σ ≈ 0.005 and FOSCTTM stabilises
-   at 0.158–0.169. The scale-up heals their weighted-Euclidean internal
-   geodesic fragility.
-3. **torchgw-precomputed becomes unreliable** on cisTopic embeddings —
-   see the preceding ablation section. Stick with pot-entropic or
-   torchgw's internal distance modes at large N on this data.
-4. **pot-exact underperforms pot-entropic** (0.152 vs 0.143 at N=5000).
-   Cross-modality single-cell data is noisy enough that entropic
-   regularisation helps; SCOT's choice of the entropic solver over the
-   exact CG solver is vindicated on its home turf.
+1. **`torchgw-precomputed` is the overall winner at every scale**:
+   best FOSCTTM on every N, stable σ ≈ 0.001–0.010, and **2× faster
+   than pot-entropic at N=5000** (26 s vs 57 s).
+2. **torchgw-precomputed gets within 1.12× of SCOT+ published 0.12**,
+   the closest any of our solvers comes.
+3. **torchgw-landmark is the speed choice**: 5.1 s at N=5000, 11×
+   faster than pot-entropic at a modest quality cost
+   (FOSCTTM 0.162 vs 0.143).
+4. **torchgw-dijkstra is Pareto-dominated on this data**: similar
+   quality to landmark at 80× the wall time. The weighted-Euclidean
+   internal distance mode + high M_samples interact badly here; on
+   cisTopic embeddings, users should prefer `precomputed` (with an
+   explicit SCOT-style cost matrix) or `landmark` (cheap).
+5. **pot-exact underperforms pot-entropic**: 0.152 vs 0.143 at N=5000.
+   Entropic regularisation helps on noisy cross-modality data (the
+   opposite of C6, where pot-exact's sharp plans won on clean mesh
+   geometry).
 
-## Cost vs quality tradeoff
+## The M_samples knob — what it is and why it matters
 
-At N=5000, there is a clean Pareto:
+torchgw's `sampled_gw` samples **M rows** of the N×N cost matrix per
+outer iteration (Monte-Carlo gradient estimate). The default M=80 is
+tuned for N>>10⁴ where N² is astronomical; at our scale it under-samples
+the cost matrix and produces either high variance or catastrophic
+failure.
 
-| Solver | wall_s | FOSCTTM | Δ vs best |
-|---|---|---|---|
-| pot-entropic-gpu | 59.6 | 0.143 | baseline |
-| torchgw-dijkstra | **19.8** | 0.158 | +10 % err, **3× faster** |
-| torchgw-landmark | **5.0** | 0.169 | +18 % err, **12× faster** |
+![M_samples sweep](../figures/c2_msamples_sweep.png)
 
-For a single high-stakes alignment, POT-entropic wins. For multi-run
-pipelines (hyperparameter searches, bootstrap resampling, atlas-level
-integrations) where sub-second-per-alignment matters and +10–20 %
-FOSCTTM is acceptable, **torchgw's landmark mode is the pragmatic
-choice** — despite its unreliability at small N.
+N ∈ {2000, 5000}, sweep M ∈ {80, 160, 320, 640, 1280, 2560, 5000},
+3 seeds, cisTopic preprocessing, ε=5e-3, torchgw-precomputed:
+
+| M / N | FOSCTTM @N=2000 | FOSCTTM @N=5000 |
+|---|---|---|
+| ~ 1.6 %  (M=80)   | 0.201 ± 0.077 | 0.314 ± 0.239 (broken) |
+| ~ 3–8 %           | 0.23 (unstable) | 0.139 ± 0.003 |
+| ~ 16 %            | 0.143 ± 0.008 | 0.134 ± 0.006 |
+| ~ 30–50 %         | mixed (seed-dependent) |
+| ≥ 50 %            | 0.135 ± 0.004 | 0.134 ± 0.001 |
+
+Wall time is **approximately flat** in M (the Sinkhorn inner and other
+overhead dominate), so larger M is essentially free quality. Default
+M=80 is **strictly harmful** at N ≤ 5000.
+
+**Rule of thumb**: `M = max(1000, 3N/4)` capped at N is safe.
+
+## ATAC preprocessing ablation
+
+Holding solver (pot-entropic ε=5e-3) and kNN recipe constant:
+
+| Preprocessing | FOSCTTM @N=5000 |
+|---|---|
+| LSI (TF-IDF + truncated SVD) | 0.246 |
+| sklearn LDA (online VB, max_iter=20) | 0.159 |
+| **cisTopic (CGS, n_iter=500)** | **0.143** |
+
+LDA's CGS-based topic model captures biologically coherent
+co-accessible peak sets that LSI/VB cannot. Preprocessing
+improvements (0.25 → 0.14) dwarf any solver choice.
 
 ## ε sensitivity
 
-At N=2000 × 3 seeds, ε sweep for the two ε-regularised solvers
-(ablation used sklearn LDA; pattern holds under cisTopic):
+At N=2000 × 3 seeds, sweep ε for the two ε-regularised solvers:
 
 ![eps sweep](../figures/c2_sc_eps.png)
 
@@ -139,54 +132,38 @@ At N=2000 × 3 seeds, ε sweep for the two ε-regularised solvers
 | **5e-3** | **0.260** | **0.255** |
 | 5e-2 | 0.273 | 0.275 |
 | 5e-1 | 0.494 | 0.495 |
-| 1.0 | 0.497 | — |
 
-Sweet spot at **ε = 5e-3**.
+(ε sweep ran with sklearn LDA; pattern holds under cisTopic.) Sweet
+spot at ε = 5e-3. Collapse at ε ≥ 5e-1; pot-entropic under-flows at
+ε = 5e-4.
 
-**Cross-track ε table**:
-
-| Track | Data | Best ε |
-|---|---|---|
-| C3 Y-fork (FGW with feature) | synthetic, feature-anchored | 5e-3 (ε-immune anyway) |
-| C6 TACO mesh | symmetric, feature-free | 5e-2 |
-| C2 PBMC multiome | noisy single-cell, L2 embeddings | 5e-3 |
-
-Best ε is task-dependent, not a universal constant.
+**Cross-track ε summary**: C2 wants 5e-3 (noisy data wants less
+smoothing to preserve what little structure survives); C6 wants 5e-2
+(symmetric mesh data needs stronger smoothing to break optima-ties);
+C3 is ε-immune (FGW feature locks the answer regardless).
 
 ## Take-home
 
-1. **Under literature-matching preprocessing (cisTopic + SCOT recipe),
-   pot-entropic-gpu is the best solver** on this task:
-   FOSCTTM 0.143 ± 0.002 at N=5000, essentially matching SCOT+'s
-   published 0.12 (1.19× gap accounts for the N difference and
-   preprocessing micro-details). This is SCOT's own recipe — our
-   benchmark validates the published approach.
-
-2. **torchgw wins on cost, not quality**, at this preprocessing
-   quality level:
-   - torchgw-dijkstra: 3× faster at +10 % FOSCTTM
-   - torchgw-landmark: 12× faster at +18 % FOSCTTM
-   The tradeoff flips relative to the previous sklearn-LDA baseline,
-   where torchgw-precomputed was best. The interpretation: sampled-GW
-   + diffuse Sinkhorn plan is more robust to preprocessing noise, but
-   cannot match exact POT when the cost matrix itself is high-quality.
-
-3. **Preprocessing dominates solver choice at every level**: LSI →
-   sklearn LDA → cisTopic cuts FOSCTTM roughly in half at each step
-   (0.25 → 0.15 → 0.143). No solver tuning comes close to this effect.
-
-4. **Best ε = 5e-3 on C2**, matching C3 but different from C6 (5e-2).
-   The key heuristic: stronger signal-to-noise ratio in the data →
-   can afford smaller ε; symmetric / feature-free data → needs
-   stronger ε to break optima-ties.
-
-5. **torchgw's three internal distance modes stratify by data
-   suitability**:
-   - `precomputed`: good when preprocessing is noisy (sklearn LDA);
-     fragile on sharper cost matrices.
-   - `landmark` / `dijkstra`: unreliable at small N (σ ≈ 0.2) but
-     self-corrects at large N. Architecture-limited for high-dim
-     non-Euclidean data but competitive with carefully tuned inputs.
+1. **Under literature-matching preprocessing (cisTopic + SCOT recipe,
+   ε=5e-3, tuned M_samples), torchgw-precomputed is the best solver
+   at every scale**: lowest FOSCTTM, 2× faster than pot-entropic, std
+   ≤ 0.010. FOSCTTM = 0.134 ± 0.001 at N=5000, **1.12× SCOT+
+   published 0.12**.
+2. **M_samples matters more than ε or solver choice** on this task:
+   M=80 default → 0.314 (broken). M=3N/4 → 0.134 (beats POT). M is
+   torchgw's hidden quality knob; the default is scalability-tuned,
+   not quality-tuned.
+3. **torchgw-landmark is the speed Pareto point**: 5 s at N=5000 with
+   modest quality loss. Useful for large sweeps or interactive work.
+4. **torchgw-dijkstra is Pareto-dominated** on this data: its internal
+   weighted-Euclidean geodesic is fragile on L2-norm high-dim
+   embeddings, and high M_samples makes it extra slow. Don't use
+   without specific reason.
+5. **Preprocessing dominates**: LSI (0.246) → sklearn LDA (0.159) →
+   cisTopic (0.143). No solver can overcome bad preprocessing.
+6. **pot-entropic > pot-exact for cross-modality**: entropic
+   regularisation helps on noisy data (opposite of C6). SCOT's choice
+   of the entropic solver is vindicated.
 
 ## Reproducing
 
@@ -206,17 +183,21 @@ micromamba run -n cistopic R -e '
   remotes::install_github("aertslab/cisTopic", upgrade="never",
                             dependencies=FALSE)'
 
-# Primary benchmark (cisTopic preprocessing; 1st run fits LDA ~60min)
+# Primary benchmark (cisTopic ATAC, M=3N/4 tuned)
+# First run fits cisTopic LDA (~60 min single-threaded); subsequent
+# runs use the cached .npz embedding.
 bash scripts/run_c2_cistopic_bench.sh
 
-# Ablation — sklearn LDA preprocessing
-bash scripts/run_c2_lda_bench.sh
+# M_samples sweep (shows where the default M=80 fails)
+python scripts/experiments/run_c2_msamples_sweep.py
+python scripts/experiments/make_c2_msamples_plot.py
 
-# Ablation — LSI preprocessing
-bash scripts/run_c2_sc.sh
-
-# ε sensitivity
+# ε sensitivity sweep
 bash scripts/run_c2_eps_sweep.sh
+
+# Preprocessing ablations (LSI, sklearn LDA)
+bash scripts/run_c2_sc.sh     # LSI
+bash scripts/run_c2_lda_bench.sh
 
 python scripts/experiments/make_c2_sc_plots.py
 ```

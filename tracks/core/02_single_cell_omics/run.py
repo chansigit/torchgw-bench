@@ -632,6 +632,10 @@ def main() -> None:
                          "'lda' = sklearn online LDA (fast but lower quality), "
                          "'cistopic' = cisTopic collapsed-Gibbs LDA via R "
                          "subprocess (default, matches SCOT+)")
+    ap.add_argument("--M-samples", type=int, default=None,
+                    help="torchgw sampled_gw per-iter cost rows. Default "
+                         "80 is scalability-tuned; for N<=5000 the gap-"
+                         "diagnostic suggests M=N//2 (see c2_msamples_sweep).")
     args = ap.parse_args()
 
     rec = build_record("core/02_single_cell_omics", args.solver, args.seed, "full")
@@ -688,6 +692,8 @@ def main() -> None:
             kwargs["epsilon"] = args.epsilon
         if args.max_iter is not None:
             kwargs["max_iter"] = args.max_iter
+        if args.M_samples is not None and args.solver.startswith("torchgw"):
+            kwargs["M_samples"] = args.M_samples
         print(f"[C2] solving with {args.solver}  kwargs={kwargs}", flush=True)
         result = fn(V_rna, V_atac, seed=args.seed, **kwargs)
 
