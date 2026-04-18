@@ -112,34 +112,76 @@ def preprocess_rna(adata, n_top_genes: int = 3000, n_comps: int = 50):
     return ad.obsm["X_pca"].astype(np.float32)
 
 
-def preprocess_atac(adata, n_top_peaks: int = 10000, n_comps: int = 50):
-    """ATAC: TF-IDF → log1p → LSI (truncated SVD on binarized+IDF counts).
-    Drop first LSI component (correlates with sequencing depth)."""
-    import scanpy as sc
+def _select_top_peaks(adata, n_top_peaks: int):
+    """Select n_top_peaks peaks by per-peak variance in raw counts."""
     import scipy.sparse as sp
-    from sklearn.utils.extmath import randomized_svd
-    ad = adata.copy()
-    # Top peaks by variance in raw counts
-    X = ad.X
+    X = adata.X
     if sp.issparse(X):
         var_per_peak = np.asarray((X.multiply(X)).mean(axis=0)).ravel() \
                         - np.asarray(X.mean(axis=0)).ravel() ** 2
     else:
         var_per_peak = X.var(axis=0)
     top_idx = np.argsort(-var_per_peak)[:n_top_peaks]
-    ad = ad[:, top_idx].copy()
-    # TF-IDF
+    return adata[:, top_idx].copy()
+
+
+def preprocess_atac_lsi(adata, n_top_peaks: int = 10000, n_comps: int = 50):
+    """LSI: top peaks → TF-IDF → truncated SVD, drop first (depth) component.
+
+    Historical ATAC pipeline (Signac, Seurat). Works but tends to retain
+    depth-related structure in later components."""
+    import scipy.sparse as sp
+    from sklearn.utils.extmath import randomized_svd
+    ad = _select_top_peaks(adata, n_top_peaks)
     X = ad.X
     if not sp.issparse(X):
         X = sp.csr_matrix(X)
     tf = X.multiply(1.0 / (np.asarray(X.sum(axis=1)) + 1e-9))
     idf = np.log(1 + X.shape[0] / (np.asarray((X > 0).sum(axis=0)).ravel() + 1e-9))
     tfidf = tf.multiply(idf).tocsr()
-    # Truncated SVD
     U, s, _ = randomized_svd(tfidf, n_components=n_comps + 1, random_state=0)
-    # Drop first component (depth-correlated)
-    emb = (U[:, 1:] * s[1:]).astype(np.float32)
-    return emb
+    return (U[:, 1:] * s[1:]).astype(np.float32)
+
+
+def preprocess_atac_lda(adata, n_top_peaks: int = 10000, n_topics: int = 50,
+                          max_iter: int = 20):
+    """LDA topic modelling: top peaks → binarise → LDA(n_topics).
+
+    Cells become mixtures over discrete topics; the per-cell topic vector
+    is the embedding. Matches SCOT+ / cisTopic-style ATAC preprocessing —
+    topics capture biologically coherent co-accessible peak sets instead
+    of depth / variance axes that SVD picks up."""
+    import scipy.sparse as sp
+    from sklearn.decomposition import LatentDirichletAllocation
+    ad = _select_top_peaks(adata, n_top_peaks)
+    X = ad.X
+    if not sp.issparse(X):
+        X = sp.csr_matrix(X)
+    # Binarise (peak open/closed). sklearn LDA accepts counts but binary
+    # is closer to what cisTopic / SCOT+ do for ATAC.
+    X_bin = (X > 0).astype(np.float32)
+    print(f"[C2]   fitting LDA(n_topics={n_topics}, max_iter={max_iter}) on "
+           f"{X_bin.shape} binarised matrix...", flush=True)
+    lda = LatentDirichletAllocation(
+        n_components=n_topics, max_iter=max_iter,
+        learning_method="online", batch_size=512,
+        random_state=0, n_jobs=-1, verbose=0,
+    )
+    emb = lda.fit_transform(X_bin)
+    return emb.astype(np.float32)
+
+
+def preprocess_atac(adata, n_top_peaks: int = 10000, n_comps: int = 50,
+                      method: str = "lda"):
+    """Dispatch to the chosen ATAC preprocessing path."""
+    if method == "lsi":
+        return preprocess_atac_lsi(adata, n_top_peaks=n_top_peaks,
+                                      n_comps=n_comps)
+    elif method == "lda":
+        return preprocess_atac_lda(adata, n_top_peaks=n_top_peaks,
+                                      n_topics=n_comps)
+    else:
+        raise ValueError(f"unknown atac method: {method}")
 
 
 def subsample_cells(V_rna: np.ndarray, V_atac: np.ndarray, n_cells: int, seed: int):
@@ -536,6 +578,9 @@ def main() -> None:
     ap.add_argument("--epsilon", type=float, default=None)
     ap.add_argument("--max-iter", type=int, default=None)
     ap.add_argument("--tag", type=str, default=None)
+    ap.add_argument("--atac-method", choices=["lsi", "lda"], default="lda",
+                    help="ATAC embedding: 'lsi' = TF-IDF + truncated SVD, "
+                         "'lda' = topic modelling (cisTopic-style, default)")
     args = ap.parse_args()
 
     rec = build_record("core/02_single_cell_omics", args.solver, args.seed, "full")
@@ -556,7 +601,7 @@ def main() -> None:
             raise FileNotFoundError(
                 f"dataset not found at {h5}; run tracks/core/02_single_cell_omics/fetch.sh first"
             )
-        cache = DATA_ROOT / f"embeddings_n_comps{args.n_comps}.npz"
+        cache = DATA_ROOT / f"embeddings_n_comps{args.n_comps}_atac_{args.atac_method}.npz"
         if cache.exists():
             print(f"[C2] loading cached embeddings {cache.name}", flush=True)
             z = np.load(cache)
@@ -567,7 +612,8 @@ def main() -> None:
             print(f"[C2] RNA shape  {adata_rna.shape}", flush=True)
             print(f"[C2] ATAC shape {adata_atac.shape}", flush=True)
             V_rna_full = preprocess_rna(adata_rna, n_comps=args.n_comps)
-            V_atac_full = preprocess_atac(adata_atac, n_comps=args.n_comps)
+            V_atac_full = preprocess_atac(adata_atac, n_comps=args.n_comps,
+                                             method=args.atac_method)
             np.savez(cache, V_rna=V_rna_full, V_atac=V_atac_full)
             print(f"[C2] cached embeddings → {cache.name}", flush=True)
         assert V_rna_full.shape[0] == V_atac_full.shape[0]
