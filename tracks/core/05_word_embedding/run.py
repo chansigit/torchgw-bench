@@ -28,7 +28,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import sys
 import time
 import threading
 from pathlib import Path
@@ -278,26 +277,15 @@ def run_torchgw_precomputed(V_src, V_tgt, seed=0, epsilon=5e-5,
                              M_samples=80, max_iter=300,
                              C_src: np.ndarray | None = None,
                              C_tgt: np.ndarray | None = None):
-    """torchgw precomputed-mode solver.
-
-    If C_src/C_tgt are provided (C5 path), they are passed directly to
-    sampled_gw, bypassing the internal kNN-geodesic computation.
-    If not provided (C2 path), builds them from knn_geodesic_matrix(V).
-    """
+    """torchgw precomputed-mode solver — C5 always passes C_src/C_tgt."""
     from torchgw import sampled_gw
+    if C_src is None or C_tgt is None:
+        raise ValueError("C5 run_torchgw_precomputed requires C_src and C_tgt")
     torch, use_cuda = _reset_tracking(seed)
     with _RSSSampler() as sampler:
         t_prep_start = time.perf_counter()
-        if C_src is None or C_tgt is None:
-            # C2-style: build kNN geodesic cost internally
-            from tracks.core._c2_helpers import knn_geodesic_matrix  # fallback
-            dist_source = knn_geodesic_matrix(V_src)
-            dist_target = knn_geodesic_matrix(V_tgt)
-            dist_source /= (dist_source.max() + 1e-12)
-            dist_target /= (dist_target.max() + 1e-12)
-        else:
-            dist_source = C_src.astype(np.float32)
-            dist_target = C_tgt.astype(np.float32)
+        dist_source = C_src.astype(np.float32)
+        dist_target = C_tgt.astype(np.float32)
         n_src, n_tgt = V_src.shape[0], V_tgt.shape[0]
         p = np.full(n_src, 1.0 / n_src, dtype=np.float64)
         q = np.full(n_tgt, 1.0 / n_tgt, dtype=np.float64)
