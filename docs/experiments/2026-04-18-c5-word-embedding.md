@@ -54,45 +54,51 @@ agglutinative — top-5k Fi words are inflected forms of few lemmas —
 the intra-lingual graph has weak cross-lingual structure that is
 destroyed by aggressive range compression).
 
-## Headline result (seed=0 only; 3-seed rerun in progress)
+## Headline result (3 seeds, mean ± std)
 
 ε = 5e-4 (paper's code default; ε=5e-5 stated in paper text does NOT
 converge under POT 0.9.6 — Sinkhorn warning, P@1 ≈ 0). torchgw uses
-`M = max(1000, 3N/4)` capped at N (the C2 rule).
+`M = max(1000, 3N/4)` capped at N (the C2 rule). POT solvers are
+deterministic given input → std=0; torchgw std reflects MC-sampling
+seed sensitivity.
 
 ### en-es (easy pair)
 
 | Solver | N=2000 | N=5000 | N=10000 |
 |---|---|---|---|
-| **pot-entropic-gpu** | **0.475** | **0.495** | 0.245 |
-| pot-exact-gpu | 0.006 | 0.450 | 0.015 |
-| torchgw-precomputed | 0.008 | 0.003 | 0.001 |
-| torchgw-dijkstra | 0.005 | **0.086** | 0.013 |
-| torchgw-landmark | 0.000 | 0.001 | 0.001 |
+| **pot-entropic-gpu** | **0.475 ± 0.000** | **0.495 ± 0.000** | 0.245 ± 0.000 |
+| pot-exact-gpu | 0.006 ± 0.000 | 0.450 ± 0.000 | 0.015 ± 0.000 |
+| torchgw-precomputed | 0.006 ± 0.004 | 0.002 ± 0.000 | 0.001 ± 0.000 |
+| torchgw-dijkstra | 0.006 ± 0.002 | **0.038 ± 0.035** | 0.031 ± 0.024 |
+| torchgw-landmark | 0.000 ± 0.000 | 0.001 ± 0.000 | 0.001 ± 0.000 |
 
 ### en-fi (hard pair)
 
-| Solver | N=2000 | N=5000 |
-|---|---|---|
-| **pot-entropic-gpu** | **0.065** | **0.155** |
-| pot-exact-gpu | 0.006 | 0.006 |
-| torchgw-precomputed | 0.003 | 0.000 |
-| torchgw-dijkstra | 0.005 | 0.001 |
-| torchgw-landmark | 0.004 | 0.001 |
+| Solver | N=2000 | N=5000 | N=10000 |
+|---|---|---|---|
+| **pot-entropic-gpu** | **0.065 ± 0.000** | **0.155 ± 0.000** | **0.176 ± 0.000** |
+| pot-exact-gpu | 0.006 ± 0.000 | 0.006 ± 0.000 | 0.013 ± 0.000 |
+| torchgw-precomputed | 0.003 ± 0.001 | 0.000 ± 0.000 | 0.000 ± 0.000 |
+| torchgw-landmark | 0.004 ± 0.000 | 0.001 ± 0.000 | 0.001 ± 0.000 |
+| torchgw-dijkstra | 0.005 ± 0.001 | 0.002 ± 0.001 | 0.006 ± 0.001 |
 
 **What stands out:**
 1. **pot-entropic wins decisively on both pairs** — opposite of C2.
-2. **torchgw-precomputed is ~150× worse than pot-entropic** at
+2. **torchgw-precomputed is ~250× worse than pot-entropic** at
    identical cost matrices, ε, and M_samples. Same inputs, vastly
    different outputs — so not preprocessing.
-3. **torchgw-dijkstra (0.086) ≫ torchgw-precomputed (0.003)** at
-   en-es N=5000 even though both are torchgw — only difference is how
-   the cost matrix is built. This is the smoking gun (see §"Why
-   torchgw loses" below).
+3. **torchgw-dijkstra (0.038 ± 0.035) ≈ 20× torchgw-precomputed (0.002)**
+   at en-es N=5000 even though both are torchgw — only difference is
+   how the cost matrix is built. **High variance** (std ≈ mean) shows
+   the gain is fragile, but the structural-cost effect is reproducible
+   (see §"Why torchgw loses" below).
 4. **pot-exact is unstable** — 0.45 at N=5000, 0.01 at N=2000 and
    N=10000. Conditional-gradient needs a Goldilocks scale.
 5. **en-es N=10000 non-monotonic** for POT — 0.245 vs 0.495 at N=5000.
    Sinkhorn inner loop budget (max_iter=100) runs out at N=10000+ε=5e-4.
+6. **en-fi monotonic in N for pot-entropic** (0.065 → 0.155 → 0.176).
+   Hard pair benefits from larger vocab; consistent with paper's
+   N=20k+Procrustes giving 0.28.
 
 ## Why torchgw loses on word embeddings — first-principles analysis
 
@@ -144,11 +150,11 @@ $\sqrt{2\ln N}$ threshold is low.
 
 ## The exploitable-structure thesis
 
-**Why does torchgw-dijkstra (0.086) crush torchgw-precomputed (0.003)
-at identical N on en-es?** Because `distance_mode="dijkstra"` makes
-torchgw build its OWN cost matrix internally: an unweighted kNN
-graph on the embeddings, then shortest-path geodesic distances on
-that graph. This is **the same structural cost as C2**. On structured
+**Why does torchgw-dijkstra (0.038 ± 0.035) crush torchgw-precomputed
+(0.002) at identical N on en-es — by ~20×, even with high variance?**
+Because `distance_mode="dijkstra"` makes torchgw build its OWN cost
+matrix internally: an unweighted kNN graph on the embeddings, then
+shortest-path geodesic distances on that graph. This is **the same structural cost as C2**. On structured
 cost:
 - Most cost entries are either **0** (same node) or **large integer**
   (far in graph) — a few bits of information per entry.

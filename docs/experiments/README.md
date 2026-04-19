@@ -170,15 +170,15 @@ Alvarez-Melis & Jaakkola 2018.
 - **[C5 benchmark + structure analysis (2026-04-18)](2026-04-18-c5-word-embedding.md)** —
   5 GPU solvers × 2 pairs {en-es, en-fi} × N ∈ {2000, 5000, 10000}.
 
-  Headline (P@1-CSLS; seed=0, 3-seed rerun pending):
+  Headline (P@1-CSLS, mean ± std over 3 seeds):
 
-  | Solver | en-es N=5000 | en-fi N=5000 |
-  |---|---|---|
-  | **pot-entropic-gpu** | **0.495** | **0.155** |
-  | pot-exact-gpu | 0.450 | 0.006 |
-  | torchgw-dijkstra | 0.086 | 0.001 |
-  | torchgw-precomputed | 0.003 | 0.000 |
-  | torchgw-landmark | 0.001 | 0.001 |
+  | Solver | en-es N=5000 | en-fi N=5000 | en-fi N=10000 |
+  |---|---|---|---|
+  | **pot-entropic-gpu** | **0.495 ± 0.000** | **0.155 ± 0.000** | **0.176 ± 0.000** |
+  | pot-exact-gpu | 0.450 ± 0.000 | 0.006 ± 0.000 | 0.013 ± 0.000 |
+  | torchgw-dijkstra | 0.038 ± 0.035 | 0.002 ± 0.001 | 0.006 ± 0.001 |
+  | torchgw-precomputed | 0.002 ± 0.000 | 0.000 ± 0.000 | 0.000 ± 0.000 |
+  | torchgw-landmark | 0.001 ± 0.000 | 0.001 ± 0.000 | 0.001 ± 0.000 |
 
   **The exploitable-structure thesis** (C5's main contribution):
   > torchgw's MC scalability implicitly assumes cost-matrix structure
