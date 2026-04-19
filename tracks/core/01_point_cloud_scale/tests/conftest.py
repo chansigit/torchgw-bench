@@ -20,6 +20,10 @@ def _load_alias(filename: str, alias: str) -> None:
 
 
 _load_alias("io.py", "c1_io")
+_load_alias("pair.py", "c1_pair")
+_load_alias("eval.py", "c1_eval")
 
 # Re-export for direct import in test files
-c1_io = sys.modules["c1_io"]
+c1_io   = sys.modules["c1_io"]
+c1_pair = sys.modules["c1_pair"]
+c1_eval = sys.modules["c1_eval"]
