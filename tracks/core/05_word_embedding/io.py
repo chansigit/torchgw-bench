@@ -89,6 +89,33 @@ def read_muse_dict(path: str) -> dict[str, set[str]]:
     return d
 
 
+def center_and_unit_norm(V: np.ndarray) -> np.ndarray:
+    """Paper preprocessing (`normalize_vecs='both'`): mean-center, then unit-norm.
+
+    fastText vectors have a non-zero mean; without centering, the resulting
+    cosine cost is dominated by a global shift and GW loses signal on the
+    morphologically-rich (fi, de, it) side.
+    """
+    V = np.array(V, dtype=np.float32)
+    V = V - V.mean(axis=0, keepdims=True)
+    norms = np.linalg.norm(V, axis=1, keepdims=True)
+    norms = np.where(norms == 0.0, 1.0, norms)
+    return (V / norms).astype(np.float32)
+
+
+def mean_normalize(C: np.ndarray) -> np.ndarray:
+    """Paper preprocessing (`normalize_dists='mean'`): divide C by its mean.
+
+    Preserves zero and relative structure; range-normalization squashes the
+    informative tail and collapses signal on hard language pairs.
+    """
+    C = np.array(C, dtype=np.float32)
+    m = C.mean()
+    if m == 0.0:
+        return C
+    return (C / m).astype(np.float32)
+
+
 def cosine_cost(V: np.ndarray) -> np.ndarray:
     """Pairwise cosine-distance matrix for rows of V.
 

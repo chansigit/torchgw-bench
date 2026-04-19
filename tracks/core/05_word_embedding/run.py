@@ -54,31 +54,52 @@ _eval = _load_local("eval")
 
 # ---- inline cost helpers (from io.py — kept inline for self-contained run.py)
 
-def cosine_cost(V: np.ndarray) -> np.ndarray:
-    """Pairwise cosine-distance matrix: C[i,j] = 1 - cos(vi, vj)."""
+def _preprocess_vecs(V: np.ndarray, mode: str) -> np.ndarray:
+    """Embedding preprocessing.
+
+    - "unit"   : unit-norm only (original C5 default, weak on hard pairs)
+    - "both"   : mean-center + unit-norm (Alvarez-Melis `normalize_vecs='both'`)
+    """
     V = np.array(V, dtype=np.float32)
+    if mode == "both":
+        V = V - V.mean(axis=0, keepdims=True)
     norms = np.linalg.norm(V, axis=1, keepdims=True)
     norms = np.where(norms == 0.0, 1.0, norms)
-    V = V / norms
-    C = (1.0 - V @ V.T).astype(np.float32)
-    np.fill_diagonal(C, 0.0)
-    return C
+    return (V / norms).astype(np.float32)
 
 
-def range_normalize(C: np.ndarray) -> np.ndarray:
-    """Rescale C to [0, 1]."""
+def _normalize_cost(C: np.ndarray, mode: str) -> np.ndarray:
+    """Cost-matrix normalization.
+
+    - "range" : (C - min) / (max - min)  → [0, 1]  (original C5 default)
+    - "mean"  : C / C.mean()             (Alvarez-Melis `normalize_dists='mean'`)
+    """
     C = np.array(C, dtype=np.float32)
-    lo, hi = C.min(), C.max()
-    if hi == lo:
-        return np.zeros_like(C, dtype=np.float32)
-    return ((C - lo) / (hi - lo)).astype(np.float32)
+    if mode == "range":
+        lo, hi = C.min(), C.max()
+        if hi == lo:
+            return np.zeros_like(C, dtype=np.float32)
+        return ((C - lo) / (hi - lo)).astype(np.float32)
+    if mode == "mean":
+        m = C.mean()
+        return C if m == 0.0 else (C / m).astype(np.float32)
+    raise ValueError(f"unknown cost-normalize mode: {mode}")
 
 
-def build_cost_matrices(V_src: np.ndarray, V_tgt: np.ndarray):
-    """Build range-normalised cosine cost matrices for src and tgt."""
-    C_src = range_normalize(cosine_cost(V_src))
-    C_tgt = range_normalize(cosine_cost(V_tgt))
-    return C_src, C_tgt
+def build_cost_matrices(V_src: np.ndarray, V_tgt: np.ndarray,
+                        vec_mode: str = "both", dist_mode: str = "mean"):
+    """Build cosine cost matrices with the paper's default preprocessing.
+
+    Paper (Alvarez-Melis & Jaakkola 2018) uses `normalize_vecs='both'` +
+    `normalize_dists='mean'`. Without centering, cos-cost is dominated by a
+    global shift; with range-normalize, the informative tail gets squashed.
+    Together they recover ~10× more signal on the hard (en-fi) pair.
+    """
+    V_src = _preprocess_vecs(V_src, vec_mode)
+    V_tgt = _preprocess_vecs(V_tgt, vec_mode)
+    C_src = (1.0 - V_src @ V_src.T).astype(np.float32); np.fill_diagonal(C_src, 0.0)
+    C_tgt = (1.0 - V_tgt @ V_tgt.T).astype(np.float32); np.fill_diagonal(C_tgt, 0.0)
+    return _normalize_cost(C_src, dist_mode), _normalize_cost(C_tgt, dist_mode), V_src, V_tgt
 
 
 # ---- record helper -------------------------------------------------------
@@ -406,10 +427,18 @@ def main() -> None:
     ])
     ap.add_argument("--seed", type=int, default=0,
                     help="Seed for solver randomness (default: 0)")
-    ap.add_argument("--epsilon", type=float, default=5e-5,
-                    help="Entropic regularisation ε (default: 5e-5)")
+    ap.add_argument("--epsilon", type=float, default=5e-4,
+                    help="Entropic regularisation ε (default: 5e-4 — paper's "
+                         "code default; POT 0.9.6 does not converge at paper-"
+                         "text's stated 5e-5)")
     ap.add_argument("--M-samples", type=int, default=None,
                     help="torchgw per-iter cost rows (default: 80)")
+    ap.add_argument("--vec-norm", default="both", choices=["unit", "both"],
+                    help="Embedding preprocessing (default: both = paper's "
+                         "normalize_vecs='both'; 'unit' = old C5 default)")
+    ap.add_argument("--dist-norm", default="mean", choices=["mean", "range"],
+                    help="Cost-matrix normalization (default: mean = paper's "
+                         "normalize_dists='mean'; 'range' = old C5 default)")
     ap.add_argument("--out", type=Path, required=True,
                     help="Output directory for JSON result")
     args = ap.parse_args()
@@ -422,6 +451,8 @@ def main() -> None:
         "lang_src": lang_src,
         "lang_tgt": lang_tgt,
         "n_words": args.n_words,
+        "vec_norm": args.vec_norm,
+        "dist_norm": args.dist_norm,
     }
 
     out_path = args.out / (
@@ -457,8 +488,10 @@ def main() -> None:
         print(f"[C5] V_src={V_src.shape}  V_tgt={V_tgt.shape}", flush=True)
 
         # ---- build cost matrices ----------------------------------------
-        print("[C5] building cosine cost matrices", flush=True)
-        C_src, C_tgt = build_cost_matrices(V_src, V_tgt)
+        print(f"[C5] building cosine cost  vecs={args.vec_norm}  dists={args.dist_norm}",
+              flush=True)
+        C_src, C_tgt, V_src, V_tgt = build_cost_matrices(
+            V_src, V_tgt, vec_mode=args.vec_norm, dist_mode=args.dist_norm)
         t_prep = time.perf_counter() - t_prep_start
         print(f"[C5] preprocessing done in {t_prep:.1f}s", flush=True)
 
