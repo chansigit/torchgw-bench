@@ -26,15 +26,18 @@ OUT="$REPO_ROOT/results/c1_point_cloud_scale"
 LOG="$REPO_ROOT/logs/c1_bench.log"
 mkdir -p "$OUT" "$REPO_ROOT/logs"
 
-INSTANCES=(0 1 2)
+# Synthetic asymmetric-spiral task (no "instance" concept — spiral shape is fixed;
+# seed varies rotation matrix + optional noise).  Keep INSTANCES=(0) for loop
+# compatibility but run.py ignores instance_idx when --data=spiral.
+INSTANCES=(0)
 N_POINTS=(10000 20000 50000 100000)
 SEEDS=(0 1 2)
 # ε=5e-2: kNN-hop operating point (NOT the C5 word-embedding 5e-4)
-EPS=5e-4
+EPS=5e-3
 
 run_cell () {
     local solver="$1"; local inst="$2"; local n="$3"; local seed="$4"
-    local out_json="$OUT/core_01_point_cloud_scale__${solver}__airplane__inst${inst}__n${n}__seed${seed}.json"
+    local out_json="$OUT/core_01_point_cloud_scale__${solver}__spiral_noise0.0__n${n}__seed${seed}.json"
 
     # Cache-skip: require status ok + torchgw cells have tuned M (>= 1000).
     # Also accept skipped_oom_risk (intentional N-conditional skip) and TimeoutError.
@@ -76,10 +79,9 @@ except Exception: print('0')")"
     local rank_flag=""
     [[ "$solver" == torchgw-lowrank-* ]] && rank_flag="--lowrank-rank 20"
 
-    echo "[c1] running $solver N=$n seed=$seed inst=$inst  $m_flag $rank_flag"
+    echo "[c1] running $solver N=$n seed=$seed  $m_flag $rank_flag"
     python3 "$RUN_PY" --solver "$solver" --seed "$seed" \
-        --shape-class airplane --instance-idx "$inst" \
-        --n-points "$n" --out "$OUT" \
+        --data spiral --n-points "$n" --out "$OUT" \
         $eps_flag $m_flag $rank_flag \
         2>&1 | grep -E "^\[C1\]" || true
 }

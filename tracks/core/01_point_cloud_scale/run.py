@@ -459,7 +459,7 @@ def run_pot_entropic_gpu(C_src: np.ndarray, C_tgt: np.ndarray,
 
 
 def run_pot_exact_gpu(C_src: np.ndarray, C_tgt: np.ndarray,
-                       seed: int = 0, max_iter: int = 500, tol: float = 1e-6):
+                       seed: int = 0, max_iter: int = 100, tol: float = 1e-6):
     import ot.gromov as otgw
     # Mean-normalize for numerical stability
     C_src_n = _normalize_cost_mean(C_src)
@@ -483,11 +483,18 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(
         description="C1 point-cloud scalability GW benchmark")
+    ap.add_argument("--data", default="spiral", choices=["spiral", "modelnet"],
+                    help="Data source: 'spiral' = asymmetric 3D helix (default, "
+                         "synthetic, avoids mirror-symmetry problem); 'modelnet' "
+                         "= ModelNet40 .off files (mirror-flip failure mode on "
+                         "bilateral shapes like airplane)")
     ap.add_argument("--shape-class", default="airplane",
                     choices=["airplane", "car", "lamp", "table", "sofa"],
-                    help="ModelNet40 shape class (default: airplane)")
+                    help="ModelNet40 shape class — only used if --data=modelnet")
     ap.add_argument("--instance-idx", type=int, default=0,
-                    help="Instance index 0-based (file is 1-indexed: 0 -> 0001.off)")
+                    help="Instance index 0-based — only used if --data=modelnet")
+    ap.add_argument("--noise-std", type=float, default=0.0,
+                    help="Target-side Gaussian noise (spiral only; default 0.0)")
     ap.add_argument("--n-points", type=int, default=5000,
                     help="Number of points after FPS downsampling (default: 5000)")
     ap.add_argument("--solver", required=True, choices=[
@@ -497,11 +504,10 @@ def main() -> None:
     ])
     ap.add_argument("--seed", type=int, default=0,
                     help="Seed for FPS + rotation + solver randomness (default: 0)")
-    ap.add_argument("--epsilon", type=float, default=5e-4,
-                    help="Entropic regularisation ε (default: 5e-4 — kNN-hop "
-                         "k=200 sweet spot at N≥10k from grid sweep; gives "
-                         "tgw-precomp P@1≈0.53 at N=10k. ε scales with 1/N: "
-                         "use 5e-3 at N=2k, 5e-4 at N=10k+)")
+    ap.add_argument("--epsilon", type=float, default=5e-3,
+                    help="Entropic regularisation ε (default: 5e-3 — spiral "
+                         "sweet spot at both N=2k and N=10k; gives POT-entropic "
+                         "P@1=0.99 at N=2k and 0.80 at N=10k)")
     ap.add_argument("--M-samples", type=int, default=None,
                     help="torchgw per-iter cost rows (default: 80 in solver)")
     ap.add_argument("--lowrank-rank", type=int, default=20,
@@ -518,10 +524,13 @@ def main() -> None:
                 f"{shape_class}_{file_idx:04d}.off")
 
     # ---- output path -----------------------------------------------------
+    if args.data == "spiral":
+        subset_tag = f"spiral_noise{args.noise_std}"
+    else:
+        subset_tag = f"{shape_class}_i{args.instance_idx}"
     out_stem = (
         f"core_01_point_cloud_scale__{args.solver}"
-        f"__{shape_class}_i{args.instance_idx}"
-        f"__n{args.n_points}__seed{args.seed}"
+        f"__{subset_tag}__n{args.n_points}__seed{args.seed}"
     )
     out_path = args.out / f"{out_stem}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -530,13 +539,14 @@ def main() -> None:
         "core/01_point_cloud_scale",
         args.solver,
         args.seed,
-        f"{shape_class}_i{args.instance_idx}_n{args.n_points}",
+        f"{subset_tag}_n{args.n_points}",
     )
     rec["dataset"] = {
-        "shape_class":    shape_class,
-        "instance_idx":   args.instance_idx,
-        "file_idx":       file_idx,
-        "off_path":       str(off_path),
+        "data":           args.data,
+        "shape_class":    shape_class if args.data == "modelnet" else None,
+        "instance_idx":   args.instance_idx if args.data == "modelnet" else None,
+        "off_path":       str(off_path) if args.data == "modelnet" else None,
+        "noise_std":      args.noise_std if args.data == "spiral" else None,
         "n_points":       args.n_points,
     }
 
@@ -566,37 +576,60 @@ def main() -> None:
 
     try:
         # ---- load and downsample -----------------------------------------
-        if not off_path.exists():
-            raise FileNotFoundError(
-                f"ModelNet40 .off file not found: {off_path}\n"
-                "Run data download / extraction for C1 first."
+        if args.data == "spiral":
+            print(
+                f"[C1] synthetic asymmetric spiral  N={args.n_points}  "
+                f"noise={args.noise_std}  seed={args.seed}", flush=True
             )
-        print(f"[C1] loading {off_path.name}", flush=True)
-        P_raw = _io.read_off(str(off_path))
-        print(f"[C1] raw shape: {P_raw.shape}", flush=True)
-
-        # ---- make pair ---------------------------------------------------
-        print(
-            f"[C1] make_pair N={args.n_points} seed={args.seed}", flush=True
-        )
-        P_src, P_tgt, R_gt = _pair.make_pair(P_raw, args.n_points, seed=args.seed)
+            P_src, P_tgt, R_gt = _pair.make_synthetic_spiral_pair(
+                n=args.n_points, seed=args.seed, noise_std=args.noise_std,
+            )
+        else:
+            if not off_path.exists():
+                raise FileNotFoundError(
+                    f"ModelNet40 .off file not found: {off_path}\n"
+                    "Run data download / extraction for C1 first."
+                )
+            print(f"[C1] loading {off_path.name}", flush=True)
+            P_raw = _io.read_off(str(off_path))
+            print(f"[C1] raw shape: {P_raw.shape}", flush=True)
+            print(
+                f"[C1] make_pair N={args.n_points} seed={args.seed}", flush=True
+            )
+            P_src, P_tgt, R_gt = _pair.make_pair(
+                P_raw, args.n_points, seed=args.seed
+            )
         print(
             f"[C1] P_src={P_src.shape}  P_tgt={P_tgt.shape}  R_gt={R_gt.shape}",
             flush=True,
         )
 
-        # ---- build cost matrices (only when needed) ----------------------
+        # ---- build cost matrices (only when needed, with disk cache) -----
         C_src: np.ndarray | None = None
         C_tgt: np.ndarray | None = None
         cost_solvers = {"pot-entropic-gpu", "pot-exact-gpu", "torchgw-precomputed"}
         if args.solver in cost_solvers:
-            print("[C1] building kNN-hop geodesic cost matrices …", flush=True)
-            t_cost0 = time.perf_counter()
-            C_src, C_tgt = build_cost_matrices(P_src, P_tgt)
-            print(
-                f"[C1] cost matrices built in {time.perf_counter() - t_cost0:.1f}s",
-                flush=True,
-            )
+            cache_dir = args.out / "_cost_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_key = f"{args.data}_{subset_tag}_n{args.n_points}_seed{args.seed}"
+            cache_path = cache_dir / f"{cache_key}.npz"
+            if cache_path.exists():
+                print(f"[C1] loading cached cost matrices from {cache_path.name}",
+                      flush=True)
+                z = np.load(cache_path)
+                C_src, C_tgt = z["C_src"], z["C_tgt"]
+            else:
+                print("[C1] building kNN-hop geodesic cost matrices …",
+                      flush=True)
+                t_cost0 = time.perf_counter()
+                C_src, C_tgt = build_cost_matrices(P_src, P_tgt)
+                print(
+                    f"[C1] cost matrices built in "
+                    f"{time.perf_counter() - t_cost0:.1f}s; caching to "
+                    f"{cache_path.name}",
+                    flush=True,
+                )
+                np.savez_compressed(cache_path, C_src=C_src, C_tgt=C_tgt)
 
         # ---- dispatch to solver -----------------------------------------
         kwargs: dict = {"seed": args.seed, "epsilon": args.epsilon}
@@ -623,9 +656,11 @@ def main() -> None:
                 P_src, P_tgt, rank=args.lowrank_rank, **kwargs)
         elif args.solver == "pot-entropic-gpu":
             assert C_src is not None and C_tgt is not None
+            kwargs.pop("M_samples", None)  # POT doesn't use sampled grads
             result = run_pot_entropic_gpu(C_src, C_tgt, **kwargs)
         elif args.solver == "pot-exact-gpu":
             assert C_src is not None and C_tgt is not None
+            kwargs.pop("M_samples", None)
             kwargs.pop("epsilon", None)
             result = run_pot_exact_gpu(C_src, C_tgt, **kwargs)
         else:
@@ -636,11 +671,12 @@ def main() -> None:
         print("[C1] evaluating correspondences …", flush=True)
         p1  = _eval.correspondence_accuracy(T)
         p5  = _eval.correspondence_recall_at_k(T, k=5)
+        sp  = _eval.arclen_spearman(T)
         proj = _eval.barycentric_project(T, P_tgt)
         cd  = _eval.chamfer_distance(proj, P_tgt)
 
         print(
-            f"[C1] P@1={p1:.4f}  P@5={p5:.4f}  Chamfer={cd:.6f}",
+            f"[C1] Spearman={sp:.4f}  P@1={p1:.4f}  P@5={p5:.4f}  Chamfer={cd:.6f}",
             flush=True,
         )
 
@@ -652,10 +688,11 @@ def main() -> None:
             "marginal_error": result["marginal_error"],
         }
         rec["metrics"]["task"] = {
-            "correspondence_accuracy":  float(p1),
+            "arclen_spearman":           float(sp),
+            "correspondence_accuracy":   float(p1),
             "correspondence_recall_at_5": float(p5),
-            "chamfer_distance":         float(cd),
-            "n_points":                 int(args.n_points),
+            "chamfer_distance":          float(cd),
+            "n_points":                  int(args.n_points),
         }
         rec["metrics"]["efficiency"] = {
             "wall_preprocess_s": result.get("wall_s_preprocess", 0.0),

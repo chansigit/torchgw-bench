@@ -3,7 +3,27 @@ from __future__ import annotations
 """C1 point-cloud scale track — correspondence and geometry evaluation metrics."""
 
 import numpy as np
+from scipy.stats import spearmanr
 from sklearn.neighbors import NearestNeighbors
+
+
+def arclen_spearman(T: np.ndarray) -> float:
+    """Spearman rank correlation between argmax(T[i,:]) and i.
+
+    For a spiral/curve dataset where source[i] and target[i] are at the same
+    arclen parameter, a correct GW plan will concentrate mass along the
+    diagonal (or a cyclic shift of it, when rotation preserves the spiral
+    parametrization).  Spearman treats shifts gracefully — it measures rank
+    agreement, invariant to constant permutation.  Returns 1.0 for perfect
+    rank, -1.0 for reversed, 0.0 for random.
+    """
+    n = T.shape[0]
+    pred = np.argmax(T, axis=1)
+    res = spearmanr(pred, np.arange(n))
+    r = float(res.correlation)  # type: ignore[attr-defined]
+    # |ρ| — reflections/reverses are valid GW solutions (no canonical direction
+    # on an asymmetric spiral), so both +1 and -1 are "correct".
+    return abs(r) if not np.isnan(r) else 0.0
 
 
 # ---------------------------------------------------------------------------
