@@ -1,0 +1,54 @@
+{
+  "track": "core/05_word_embedding",
+  "solver": "pot-entropic-gpu",
+  "seed": 1,
+  "solver_version": "pot==0.9.6.post1",
+  "subset": "en-es_n5000",
+  "timestamp": "2026-04-19T00:06:37.231449+00:00",
+  "host": "sh04-01n10.int",
+  "status": "ok",
+  "error": null,
+  "dataset": {
+    "pair": "en-es",
+    "lang_src": "en",
+    "lang_tgt": "es",
+    "n_words": 5000
+  },
+  "hyperparams": {
+    "epsilon": 0.0005,
+    "max_iter": 100,
+    "tol": 1e-09,
+    "loss_fun": "square_loss",
+    "algorithm": "entropic",
+    "backend": "gpu",
+    "gpu_dtype": "float64"
+  },
+  "metrics": {
+    "correctness": {
+      "gw_cost": 0.0048457087392487636,
+      "marginal_error": 1.3552527156068805e-19
+    },
+    "task": {
+      "dict_used": "train",
+      "p1_nn": 0.3188976377952756,
+      "p5_nn": 0.4276027996500437,
+      "p1_csls": 0.37357830271216097,
+      "p5_csls": 0.4844706911636045,
+      "test_p1_nn": 0.0,
+      "test_p5_nn": 0.0,
+      "test_p1_csls": 0.0,
+      "test_p5_csls": 0.0
+    },
+    "efficiency": {
+      "wall_s": 50.03682083077729,
+      "wall_s_preprocess": 0.33993680216372013,
+      "wall_s_solve": 49.69688402861357,
+      "wall_s_total": 50.03682083077729,
+      "gpu_peak_gb": 2.0571513175964355,
+      "ram_peak_gb": 1.0601234436035156,
+      "iterations": 10
+    },
+    "stability": {}
+  },
+  "artifacts": {}
+}

@@ -1,0 +1,10 @@
+{
+  "solver": "torchgw-precomputed",
+  "pair": "en-es",
+  "n": 5000,
+  "seed": 2,
+  "M": 320,
+  "p1_csls": 0.0032808398950131233,
+  "wall_s": 0.995897589251399,
+  "gpu_peak_gb": 0.9566802978515625
+}

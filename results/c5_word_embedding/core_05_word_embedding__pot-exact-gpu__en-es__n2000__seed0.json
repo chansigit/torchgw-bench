@@ -1,0 +1,53 @@
+{
+  "track": "core/05_word_embedding",
+  "solver": "pot-exact-gpu",
+  "seed": 0,
+  "solver_version": "pot==0.9.6.post1",
+  "subset": "en-es_n2000",
+  "timestamp": "2026-04-18T21:59:29.587231+00:00",
+  "host": "sh04-01n10.int",
+  "status": "ok",
+  "error": null,
+  "dataset": {
+    "pair": "en-es",
+    "lang_src": "en",
+    "lang_tgt": "es",
+    "n_words": 2000
+  },
+  "hyperparams": {
+    "max_iter": 500,
+    "tol": 1e-06,
+    "loss_fun": "square_loss",
+    "algorithm": "exact-CG",
+    "backend": "gpu",
+    "gpu_dtype": "float64"
+  },
+  "metrics": {
+    "correctness": {
+      "gw_cost": 0.0053616603381203805,
+      "marginal_error": 0.0
+    },
+    "task": {
+      "dict_used": "train",
+      "p1_nn": 0.009345794392523364,
+      "p5_nn": 0.026937877954920284,
+      "p1_csls": 0.009345794392523364,
+      "p5_csls": 0.025288620120945574,
+      "test_p1_nn": 0.0,
+      "test_p5_nn": 0.0,
+      "test_p1_csls": 0.0,
+      "test_p5_csls": 0.0
+    },
+    "efficiency": {
+      "wall_s": 6.930771278217435,
+      "wall_s_preprocess": 0.05832648929208517,
+      "wall_s_solve": 6.87244478892535,
+      "wall_s_total": 6.930771278217435,
+      "gpu_peak_gb": 0.08946943283081055,
+      "ram_peak_gb": 1.0650177001953125,
+      "iterations": -1
+    },
+    "stability": {}
+  },
+  "artifacts": {}
+}

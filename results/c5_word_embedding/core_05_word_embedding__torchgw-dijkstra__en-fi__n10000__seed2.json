@@ -1,0 +1,21 @@
+{
+  "track": "core/05_word_embedding",
+  "solver": "torchgw-dijkstra",
+  "seed": 2,
+  "subset": "en-fi_n10000",
+  "status": "fail",
+  "error": "TimeoutError: N=10000 torchgw-dijkstra exceeds 10min threshold \u2014 skipped for bench efficiency",
+  "dataset": {
+    "pair": "en-fi",
+    "lang_src": "en",
+    "lang_tgt": "fi",
+    "n_words": 10000
+  },
+  "hyperparams": {
+    "epsilon": 0.0005,
+    "M_samples": 7500
+  },
+  "metrics": {
+    "task": null
+  }
+}

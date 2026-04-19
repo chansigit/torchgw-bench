@@ -497,13 +497,18 @@ def main() -> None:
         gold_test  = _io.read_muse_dict(str(dict_test))
         gold_train = _io.read_muse_dict(str(dict_train)) if dict_train.exists() else {}
 
-        # Choose primary dict: test if N >= 5000, else train
-        if args.n_words >= 5000 or not gold_train:
-            gold_primary = gold_test
-            dict_label = "test"
-        else:
+        # Choose primary dict for reporting.
+        # The MUSE test dict (5000-6500) covers words ranked 5000-6500 which
+        # are NOT in our vocabulary when we load top-N words.  The train dict
+        # (0-5000) has high coverage for any N >= 2000.  Always use train as
+        # the primary metric; report test dict scores for completeness (will be
+        # zero whenever N < ~6500 because those words are outside our vocab).
+        if gold_train:
             gold_primary = gold_train
             dict_label = "train"
+        else:
+            gold_primary = gold_test
+            dict_label = "test"
         print(f"[C5] using '{dict_label}' dict for eval (n_words={args.n_words})",
               flush=True)
 

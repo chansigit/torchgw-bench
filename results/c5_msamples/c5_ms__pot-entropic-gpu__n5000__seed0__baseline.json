@@ -1,0 +1,10 @@
+{
+  "solver": "pot-entropic-gpu",
+  "pair": "en-es",
+  "n": 5000,
+  "seed": 0,
+  "M": null,
+  "p1_csls": 0.37357830271216097,
+  "wall_s": 50.73651727847755,
+  "gpu_peak_gb": 2.0571513175964355
+}

@@ -1,0 +1,53 @@
+{
+  "track": "core/05_word_embedding",
+  "solver": "torchgw-precomputed",
+  "seed": 1,
+  "solver_version": "torchgw==unknown",
+  "subset": "en-fi_n5000",
+  "timestamp": "2026-04-19T00:15:00.919818+00:00",
+  "host": "sh04-01n10.int",
+  "status": "ok",
+  "error": null,
+  "dataset": {
+    "pair": "en-fi",
+    "lang_src": "en",
+    "lang_tgt": "fi",
+    "n_words": 5000
+  },
+  "hyperparams": {
+    "M_samples": 3750,
+    "epsilon": 0.0005,
+    "max_iter": 300,
+    "fgw_alpha": 1.0,
+    "distance_mode": "precomputed",
+    "mixed_precision": true
+  },
+  "metrics": {
+    "correctness": {
+      "gw_cost": 0.006920901592820883,
+      "marginal_error": 7.277947802706848e-07
+    },
+    "task": {
+      "dict_used": "train",
+      "p1_nn": 0.0,
+      "p5_nn": 0.00023137436372049977,
+      "p1_csls": 0.0,
+      "p5_csls": 0.0006941230911614993,
+      "test_p1_nn": 0.0,
+      "test_p5_nn": 0.0,
+      "test_p1_csls": 0.0,
+      "test_p5_csls": 0.0
+    },
+    "efficiency": {
+      "wall_s": 2.56711748521775,
+      "wall_s_preprocess": 0.13710583839565516,
+      "wall_s_solve": 2.430011646822095,
+      "wall_s_total": 2.56711748521775,
+      "gpu_peak_gb": 1.1014714241027832,
+      "ram_peak_gb": 1.3707466125488281,
+      "iterations": 97
+    },
+    "stability": {}
+  },
+  "artifacts": {}
+}

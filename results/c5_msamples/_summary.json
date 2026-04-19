@@ -1,0 +1,56 @@
+[
+  {
+    "solver": "torchgw-precomputed",
+    "n": 5000,
+    "M": 80,
+    "p1_csls_mean": 0.0006561679790026247,
+    "p1_csls_std": 0.00035717260757993266,
+    "wall_s_mean": 2.1264465680966773,
+    "n_seeds": 3
+  },
+  {
+    "solver": "torchgw-precomputed",
+    "n": 5000,
+    "M": 3750,
+    "p1_csls_mean": 0.0058326042578011085,
+    "p1_csls_std": 0.0016593477218928318,
+    "wall_s_mean": 1.6539500327780843,
+    "n_seeds": 3
+  },
+  {
+    "solver": "pot-entropic-gpu",
+    "n": 5000,
+    "M": null,
+    "p1_csls_mean": 0.373578302712161,
+    "p1_csls_std": 5.551115123125783e-17,
+    "wall_s_mean": 50.34223124850541,
+    "n_seeds": 3
+  },
+  {
+    "solver": "torchgw-precomputed",
+    "n": 5000,
+    "M": 1280,
+    "p1_csls_mean": 0.0037182852143482063,
+    "p1_csls_std": 0.0009943264579313105,
+    "wall_s_mean": 1.1850748422245185,
+    "n_seeds": 3
+  },
+  {
+    "solver": "torchgw-precomputed",
+    "n": 5000,
+    "M": 320,
+    "p1_csls_mean": 0.002770487022455526,
+    "p1_csls_std": 0.00037175703656990266,
+    "wall_s_mean": 1.1638368774826329,
+    "n_seeds": 3
+  },
+  {
+    "solver": "torchgw-precomputed",
+    "n": 5000,
+    "M": 5000,
+    "p1_csls_mean": 0.005468066491688539,
+    "p1_csls_std": 0.001115271109709708,
+    "wall_s_mean": 1.9689232123394806,
+    "n_seeds": 3
+  }
+]
