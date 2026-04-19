@@ -1,44 +1,56 @@
 # torchgw-bench experiments — index
 
-Comparison of `torchgw` and POT GW / FGW solvers across three tracks:
+Comparison of `torchgw` and POT GW / FGW solvers across four tracks:
 **C3 Y-fork branched manifold** (FGW with feature anchor),
 **C6 TACO shape correspondence** (pure GW on bilaterally-symmetric
-meshes), and **C2 single-cell multi-omics** (paired RNA+ATAC alignment).
-All figures in [`../figures/`](../figures); hardware is
-**NVIDIA H100 80GB HBM3** throughout.
+meshes), **C2 single-cell multi-omics** (paired RNA+ATAC alignment),
+and **C5 bilingual word-embedding alignment** (cosine cost on fastText
+vectors, Alvarez-Melis 2018). All figures in [`../figures/`](../figures);
+hardware is **NVIDIA H100 80GB HBM3** throughout.
 
 ## Take-home
 
-> **On the cost axis torchgw wins across the board** (1–2 orders of
+> **On the cost axis torchgw wins when it wins** (1–2 orders of
 > magnitude faster than POT, and the only option above N≈5k where POT's
-> O(N²) memory wall kicks in).
+> O(N²) memory wall kicks in). **But in C5 it catastrophically loses
+> on accuracy** — dense cosine cost breaks `sampled_gw`'s MC estimator.
 >
-> **On the accuracy axis the winner depends on data regime**:
+> **On the accuracy axis the winner depends on cost-matrix structure,
+> not N**:
 >
 > - **Feature-anchored FGW** (C3): tie — both hit ρ ≥ 0.98 at
 >   saturation. Torchgw wins the cost axis cleanly.
-> - **Pure GW on symmetric feature-free data** (C6): POT-exact wins by
+> - **Pure GW on symmetric feature-free mesh** (C6): POT-exact wins by
 >   ~1.3× on supervised geodesic error; its sparse CG plan beats
 >   torchgw's diffuse Sinkhorn plan when the task needs sharp 1-to-1
 >   matching.
-> - **Cross-modality with matched preprocessing** (C2): **torchgw-
+> - **Cross-modality with kNN-geodesic cost** (C2): **torchgw-
 >   precomputed wins outright** — lower FOSCTTM and 2–9× faster than
 >   pot-entropic, once the `M_samples` default is raised past the
 >   scalability floor.
+> - **Bilingual word embedding with dense cosine cost** (C5):
+>   **pot-entropic wins by ~150×**. torchgw-precomputed gives P@1 ≈ 0
+>   on the same cost matrices because MC sampling has insufficient
+>   SNR on near-Gaussian-dense cost.
 >
-> ### Decision rule
+> ### Decision rule (revised with C5)
 >
-> 1. **N ≥ 10⁴** → torchgw (POT OOMs).
+> 1. **N ≥ 10⁴** → torchgw (POT OOMs), but ONLY if cost is
+>    structured (kNN, sparse, long-tailed). Dense cost → POT with
+>    memory workarounds, or abandon GW.
 > 2. **Feature-anchored FGW** → torchgw if speed matters, POT
 >    otherwise; both reach the same quality.
-> 3. **Pure GW on clean symmetric geometry** (meshes, shape
->    correspondence) → POT-exact for best argmax matching.
-> 4. **Cross-modality / noisy high-dim embeddings** (single cell, etc.)
->    → torchgw-precomputed with SCOT-style cost matrix and
->    `M_samples ≥ N/2`.
-> 5. **Never leave `M_samples` at default 80** for N < 10k — it's
->    scalability-tuned, not quality-tuned, and under-samples the
->    cost matrix badly at small N.
+> 3. **Pure GW on clean symmetric geometry** → POT-exact for best
+>    argmax matching.
+> 4. **Cost built from kNN / graph / geodesic** (C2-style) → torchgw-
+>    precomputed with SCOT cost and `M_samples ≥ N/2`.
+> 5. **Dense-cosine cost on high-dim embeddings** (C5-style) → POT,
+>    full stop. torchgw-dijkstra is usable (it internally builds kNN
+>    structure) but loses to POT by ~6×.
+> 6. **Never leave `M_samples` at default 80** for N < 10k.
+> 7. **Momentum α=0.9 (default) is aggressive for noisy gradients** —
+>    α=0.1 implements an implicit 10-iter EMA that helps on marginal
+>    SNR, but does not rescue truly dense cost at scale.
 
 ## C3 — Y-fork branched spiral / Swiss roll (`core/03_branched`)
 
@@ -148,33 +160,87 @@ L2-norm, kNN connectivity, hop-count Dijkstra, uniform marginals).
   cisTopic — `precomputed` (best quality) or `landmark` (best speed)
   are the useful torchgw modes.
 
+## C5 — Bilingual word-embedding alignment (`core/05_word_embedding`)
+
+Pure GW alignment between English and Spanish/Finnish fastText vectors.
+Intra-lingual cost is mean-normalized cosine distance; evaluation is
+P@1/P@5 with CSLS against MUSE bilingual dictionaries. Reproduces
+Alvarez-Melis & Jaakkola 2018.
+
+- **[C5 benchmark + structure analysis (2026-04-18)](2026-04-18-c5-word-embedding.md)** —
+  5 GPU solvers × 2 pairs {en-es, en-fi} × N ∈ {2000, 5000, 10000}.
+
+  Headline (P@1-CSLS; seed=0, 3-seed rerun pending):
+
+  | Solver | en-es N=5000 | en-fi N=5000 |
+  |---|---|---|
+  | **pot-entropic-gpu** | **0.495** | **0.155** |
+  | pot-exact-gpu | 0.450 | 0.006 |
+  | torchgw-dijkstra | 0.086 | 0.001 |
+  | torchgw-precomputed | 0.003 | 0.000 |
+  | torchgw-landmark | 0.001 | 0.001 |
+
+  **The exploitable-structure thesis** (C5's main contribution):
+  > torchgw's MC scalability implicitly assumes cost-matrix structure
+  > — sparse, low-rank, or localized. For structured cost, MC sampling
+  > naturally lands in informative regions. For **structurally dense**
+  > cost (near-Gaussian entries with weak tail signal), the MC gradient
+  > becomes an uninformative bootstrap. The algorithm cannot recover.
+
+  **Smoking gun**: at en-es N=5000, torchgw-dijkstra (which builds its
+  *own* kNN-sparse geodesic cost internally) reaches P@1=0.086 while
+  torchgw-precomputed (fed our dense cosine cost) reaches 0.003 —
+  same solver, same N, same ε, ~30× difference **due to cost structure
+  alone**.
+
+  **SNR argument**: per-entry Sinkhorn row argmin requires
+  SNR ≳ √(2 ln N). At N=2000 with mean-normalized cosine (σ_C ≈ 0.08)
+  and M_samples=N, SNR ≈ 2.4 vs threshold 3.9 — the math predicts
+  failure quantitatively.
+
+  Two C5-specific sub-findings:
+  - **Preprocessing is a 0/1 switch**: `normalize_vecs='both'` +
+    `normalize_dists='mean'` (paper's code defaults, not text defaults)
+    vs unit+range — en-fi P@1 jumps 12× (0.007 → 0.091) at N=2000.
+  - **ε finding**: paper text says ε=5e-5, paper code uses 5e-4. POT
+    0.9.6's Sinkhorn does not converge at 5e-5. **5e-4 is the actual
+    operating point.**
+
 ## Cross-track synthesis
 
-| Axis | C3 (FGW, feature-anchored) | C6 (pure GW, symmetric mesh) | C2 (cross-omics, matched preprocessing) |
-|---|---|---|---|
-| Who wins accuracy | Tie (saturation) | **POT-exact** (1.33× supervised) | **torchgw-precomputed** (best every N) |
-| Who wins cost | torchgw (1–2 orders) | torchgw (2–7×) | torchgw (2–9×) |
-| Best ε | 5e-3 (ε-immune) | 5e-2 | 5e-3 |
-| Best M_samples | default 80 OK | 80 OK | **3N/4 required** |
-| N ceiling | 20k (POT OOM) | tested at 2k | tested at 5k |
-| Dominant failure | POT OOM | torchgw mirror flip | torchgw M_samples under-sampling |
-| Winning torchgw mode | any | precomputed (if tuned) | **precomputed** (with SCOT cost) |
+| Axis | C3 (FGW anchor) | C6 (symmetric mesh) | C2 (cross-omics + kNN) | C5 (dense cosine) |
+|---|---|---|---|---|
+| Who wins accuracy | Tie | POT-exact 1.33× | torchgw-precomputed | **POT-entropic ~150×** |
+| Who wins cost | torchgw | torchgw | torchgw | (POT wins accuracy decisively) |
+| Cost structure | — (FGW) | dense geodesic mesh | **kNN hop-count** (sparse) | **dense cosine** (near-Gaussian) |
+| Best ε | 5e-3 (immune) | 5e-2 | 5e-3 | **5e-4** |
+| Best M_samples | 80 OK | 80 OK | 3N/4 required | 3N/4 insufficient |
+| Dominant failure | POT OOM | torchgw mirror flip | M_samples floor | **MC SNR below Gumbel threshold** |
+| Winning torchgw mode | any | precomputed (tuned) | precomputed | none — abandon sampled_gw |
 
-### The cross-track lesson
+### The cross-track lesson (revised)
 
-Same architecture (Sinkhorn-regularised sampled-GW) plays out differently
-against three task structures:
+Same architecture (sampled-GW + Sinkhorn) plays out differently against
+**four task structures**, and the governing variable is **cost-matrix
+structure**, not N:
 
-- **C3 (anchored)**: the FGW feature does the work; Sinkhorn diffuseness
-  doesn't hurt because the feature locks the optimum. torchgw's
-  scalability wins cleanly.
-- **C6 (clean symmetric)**: no feature anchor, geometry has mirror
-  ambiguity; POT-exact's sparse CG plan commits cleanly to one mirror,
-  torchgw's diffuse plan averages between them.
-- **C2 (noisy cross-modal)**: entropic regularisation actually helps —
-  Sinkhorn is the right inner solver. Once torchgw's `M_samples` knob
-  is tuned out of its scalability-default trap, torchgw beats POT
-  on both axes.
+- **C3 (feature anchor)**: FGW feature locks the answer; Sinkhorn
+  diffuseness is harmless.
+- **C6 (dense geodesic, symmetric)**: POT-exact's sparse CG commits to
+  one mirror; torchgw's diffuse plan averages mirrors.
+- **C2 (kNN-sparse geodesic)**: MC sampling naturally hits informative
+  entries (few non-zero, long-tailed); torchgw wins.
+- **C5 (dense cosine, weak tail)**: MC sampling is a uninformative
+  bootstrap; torchgw catastrophically loses to POT.
+
+The axis is not "N size" or "task hardness" but **cost matrix entry
+distribution**:
+- Long-tailed / sparse / bimodal → torchgw wins (informative sampling)
+- Near-Gaussian dense → POT wins (exact bilinear gradient needed)
+
+**This is the unified diagnostic from four tracks**: before deploying
+torchgw, plot a histogram of your cost matrix entries. Long tail or
+peak-at-zero → go torchgw. Dense Gaussian → stay with POT.
 
 **`M_samples` is torchgw's hidden quality knob.** The default M=80 is
 tuned for N >> 10⁴ (where N² is astronomical and sampling is the whole
@@ -217,7 +283,14 @@ python scripts/experiments/run_c2_msamples_sweep.py
 python scripts/experiments/make_c2_msamples_plot.py
 python scripts/experiments/make_c2_sc_plots.py
 
+# --- C5 bilingual word-embedding alignment ---
+bash tracks/core/05_word_embedding/fetch.sh    # ~3 GB (en/es/fi fastText + MUSE dicts)
+bash scripts/run_c5_bench.sh                   # ~4 hours for 90 cells
+python scripts/experiments/run_c5_msamples_sweep.py
+python scripts/experiments/make_c5_plots.py
+
 # --- Tests ---
 python -m pytest tracks/core/03_branched/tests/ \
-                  tracks/core/06_shape_correspondence/tests/ -v
+                  tracks/core/06_shape_correspondence/tests/ \
+                  tracks/core/05_word_embedding/tests/ -v
 ```
