@@ -5,8 +5,13 @@ Given a ModelNet40 .off file, we downsample to N points, apply a random rotation
 to get a target cloud, then align source -> target via GW and evaluate correspondence.
 
 Pipeline design choices:
-  * Cost matrix: pairwise Euclidean distance (no normalization — both sides are on
-    the same scale, and the task is rotation-invariant).
+  * Cost matrix: **kNN-graph hop-count geodesic** (NOT raw Euclidean).  Smoke
+    tests at N=1000 showed raw Euclidean cost (dense, mean ~125) gives
+    torchgw P@1 ≈ 0 regardless of epsilon — the dense Gaussian-like distribution
+    of pairwise distances has insufficient SNR for sampled_gw's MC gradient
+    (same pathology as C5 cosine cost).  kNN-hop cost (sparse + long-tailed)
+    matches the C2 recipe that lets torchgw work; partial recovery observed
+    (torchgw P@1 ~ 0.4 vs POT-exact ~ 0.98 at N=1000).
   * GT correspondence is identity: source[i] <-> target[i] (FPS + rotation).
   * Evaluation: P@1 (correspondence_accuracy), P@5 (correspondence_recall_at_5),
     Chamfer distance (via barycentric projection).
@@ -54,23 +59,43 @@ _eval = _load_local("eval")
 
 # ---- cost-matrix construction -------------------------------------------
 
-def build_cost_matrices(P_src: np.ndarray, P_tgt: np.ndarray):
-    """Pairwise Euclidean distance matrices for source and target point clouds.
+def build_cost_matrices(P_src: np.ndarray, P_tgt: np.ndarray, k: int = 20):
+    """kNN-graph hop-count geodesic cost matrices for source and target.
 
-    Raw distances (no normalization) are returned.  POT callers should normalize
-    by the mean before passing to Sinkhorn (epsilon is specified relative to the
-    mean cost scale; raw ModelNet40 coords span ~[-250, +250], giving mean
-    Euclidean cost ~100-150, so epsilon=5e-3 would be 4 orders of magnitude too
-    small without normalization).  torchgw solvers handle scaling internally.
+    Pipeline (matches C2 SCOT recipe):
+      1. Build symmetric kNN connectivity graph (k=20 default) on each cloud.
+      2. Run unweighted Dijkstra → integer hop-count distance matrix.
+      3. Replace any inf (disconnected components) with 1.5× max finite.
+      4. Normalize each by its max → both in [0, 1].
+
+    Why not raw Euclidean: dense pairwise Euclidean cost (mean ~125, std ~63
+    for ModelNet airplane) has near-Gaussian distribution; torchgw sampled MC
+    gradient has SNR < sqrt(2 ln N) → P@1 ≈ 0 regardless of ε (same pathology
+    as C5 cosine cost).  kNN-hop cost is sparse + long-tailed, matching the
+    structure where torchgw works (cf. C2 single-cell).
+
+    Returns (C_src, C_tgt) both float32 in [0, 1].
     """
-    from scipy.spatial.distance import cdist
-    C_src = cdist(P_src, P_src, metric="euclidean").astype(np.float32)
-    C_tgt = cdist(P_tgt, P_tgt, metric="euclidean").astype(np.float32)
-    return C_src, C_tgt
+    from sklearn.neighbors import kneighbors_graph
+    from scipy.sparse.csgraph import dijkstra as scipy_dijkstra
+
+    def _knn_hop(P: np.ndarray) -> np.ndarray:
+        G = kneighbors_graph(P, n_neighbors=k, mode="connectivity",
+                             include_self=False)
+        G = ((G + G.T) > 0).astype(np.float32)  # symmetrize
+        D = scipy_dijkstra(G, unweighted=True, directed=False).astype(np.float32)
+        finite = D[~np.isinf(D)]
+        if finite.size and np.isinf(D).any():
+            D[np.isinf(D)] = float(finite.max()) * 1.5
+        m = float(D.max())
+        return (D / m).astype(np.float32) if m > 0 else D
+
+    return _knn_hop(P_src), _knn_hop(P_tgt)
 
 
 def _normalize_cost_mean(C: np.ndarray) -> np.ndarray:
-    """Mean-normalize a cost matrix: C / C.mean() so typical entry ≈ 1."""
+    """Mean-normalize a cost matrix: C / C.mean() so typical entry ≈ 1.
+    Used by POT callers to put epsilon on the natural [0,1] scale."""
     C = np.array(C, dtype=np.float32)
     m = float(C.mean())
     return C if m == 0.0 else (C / m).astype(np.float32)
@@ -472,8 +497,10 @@ def main() -> None:
     ])
     ap.add_argument("--seed", type=int, default=0,
                     help="Seed for FPS + rotation + solver randomness (default: 0)")
-    ap.add_argument("--epsilon", type=float, default=5e-3,
-                    help="Entropic regularisation ε (default: 5e-3)")
+    ap.add_argument("--epsilon", type=float, default=5e-2,
+                    help="Entropic regularisation ε (default: 5e-2 — kNN-hop "
+                         "cost sweet spot per smoke test; smaller ε on this "
+                         "structured cost makes torchgw collapse to uniform plan)")
     ap.add_argument("--M-samples", type=int, default=None,
                     help="torchgw per-iter cost rows (default: 80 in solver)")
     ap.add_argument("--lowrank-rank", type=int, default=20,
@@ -558,10 +585,11 @@ def main() -> None:
         )
 
         # ---- build cost matrices (only when needed) ----------------------
-        C_src = C_tgt = None
+        C_src: np.ndarray | None = None
+        C_tgt: np.ndarray | None = None
         cost_solvers = {"pot-entropic-gpu", "pot-exact-gpu", "torchgw-precomputed"}
         if args.solver in cost_solvers:
-            print("[C1] building Euclidean cost matrices …", flush=True)
+            print("[C1] building kNN-hop geodesic cost matrices …", flush=True)
             t_cost0 = time.perf_counter()
             C_src, C_tgt = build_cost_matrices(P_src, P_tgt)
             print(
@@ -583,6 +611,7 @@ def main() -> None:
         elif args.solver == "torchgw-dijkstra":
             result = run_torchgw_dijkstra(P_src, P_tgt, **kwargs)
         elif args.solver == "torchgw-precomputed":
+            assert C_src is not None and C_tgt is not None
             result = run_torchgw_precomputed(
                 P_src, P_tgt, C_src=C_src, C_tgt=C_tgt, **kwargs)
         elif args.solver == "torchgw-lowrank-landmark":
@@ -592,8 +621,10 @@ def main() -> None:
             result = run_torchgw_lowrank_dijkstra(
                 P_src, P_tgt, rank=args.lowrank_rank, **kwargs)
         elif args.solver == "pot-entropic-gpu":
+            assert C_src is not None and C_tgt is not None
             result = run_pot_entropic_gpu(C_src, C_tgt, **kwargs)
         elif args.solver == "pot-exact-gpu":
+            assert C_src is not None and C_tgt is not None
             kwargs.pop("epsilon", None)
             result = run_pot_exact_gpu(C_src, C_tgt, **kwargs)
         else:
