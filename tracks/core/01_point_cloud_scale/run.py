@@ -59,7 +59,7 @@ _eval = _load_local("eval")
 
 # ---- cost-matrix construction -------------------------------------------
 
-def build_cost_matrices(P_src: np.ndarray, P_tgt: np.ndarray, k: int = 20):
+def build_cost_matrices(P_src: np.ndarray, P_tgt: np.ndarray, k: int = 200):
     """kNN-graph hop-count geodesic cost matrices for source and target.
 
     Pipeline (matches C2 SCOT recipe):
@@ -497,10 +497,11 @@ def main() -> None:
     ])
     ap.add_argument("--seed", type=int, default=0,
                     help="Seed for FPS + rotation + solver randomness (default: 0)")
-    ap.add_argument("--epsilon", type=float, default=5e-2,
-                    help="Entropic regularisation ε (default: 5e-2 — kNN-hop "
-                         "cost sweet spot per smoke test; smaller ε on this "
-                         "structured cost makes torchgw collapse to uniform plan)")
+    ap.add_argument("--epsilon", type=float, default=5e-4,
+                    help="Entropic regularisation ε (default: 5e-4 — kNN-hop "
+                         "k=200 sweet spot at N≥10k from grid sweep; gives "
+                         "tgw-precomp P@1≈0.53 at N=10k. ε scales with 1/N: "
+                         "use 5e-3 at N=2k, 5e-4 at N=10k+)")
     ap.add_argument("--M-samples", type=int, default=None,
                     help="torchgw per-iter cost rows (default: 80 in solver)")
     ap.add_argument("--lowrank-rank", type=int, default=20,

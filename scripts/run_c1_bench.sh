@@ -4,7 +4,10 @@
 # Sweeps: shape_class=airplane; instance_idx ∈ {0,1,2}; N ∈ {10000,20000,50000,100000};
 #         seeds ∈ {0,1,2}; N-conditional solver list (see Step 2 below).
 # torchgw variants: M = max(1000, 3N/4) capped at N.
-# ε=5e-2 (kNN-hop sweet spot, NOT 5e-4 like C5).
+# Cost: kNN-hop geodesic with k=200 (sweet spot at N=10k+; tradeoff vs k=400
+# which gave P@1=0.66 but Dijkstra at k=400 takes 5min/cell at N=10k).
+# ε=5e-4 (k=200 sweet spot from grid sweep — gives torchgw-precomp P@1≈0.53
+# at N=10k; smaller than C5 word embedding's 5e-4 by accident).
 #
 # N-conditional solver list:
 #   N ≤ 20k: all 7 solvers (5 standard + 2 lowrank)
@@ -27,7 +30,7 @@ INSTANCES=(0 1 2)
 N_POINTS=(10000 20000 50000 100000)
 SEEDS=(0 1 2)
 # ε=5e-2: kNN-hop operating point (NOT the C5 word-embedding 5e-4)
-EPS=5e-2
+EPS=5e-4
 
 run_cell () {
     local solver="$1"; local inst="$2"; local n="$3"; local seed="$4"
