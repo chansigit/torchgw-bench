@@ -46,7 +46,9 @@ def make_pair(
     """
     source: np.ndarray = _c1_io.fps_downsample(P, n, seed=seed)
 
-    R_gt: np.ndarray = Rotation.random(random_state=seed + 1).as_matrix().astype(np.float32)
+    R_gt: np.ndarray = Rotation.random(
+        rng=np.random.default_rng(seed + 1)
+    ).as_matrix().astype(np.float32)
 
     target: np.ndarray = (source @ R_gt.T).astype(np.float32)
 

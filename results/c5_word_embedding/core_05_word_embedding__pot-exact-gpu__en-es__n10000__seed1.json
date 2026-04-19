@@ -2,19 +2,54 @@
   "track": "core/05_word_embedding",
   "solver": "pot-exact-gpu",
   "seed": 1,
+  "solver_version": "pot==0.9.6.post1",
   "subset": "en-es_n10000",
-  "status": "fail",
-  "error": "TimeoutError: N=10000 pot-exact-gpu exceeds 10min threshold \u2014 skipped for bench efficiency",
+  "timestamp": "2026-04-19T10:29:47.706748+00:00",
+  "host": "sh04-01n07.int",
+  "status": "ok",
+  "error": null,
   "dataset": {
     "pair": "en-es",
     "lang_src": "en",
     "lang_tgt": "es",
-    "n_words": 10000
+    "n_words": 10000,
+    "vec_norm": "both",
+    "dist_norm": "mean"
   },
   "hyperparams": {
-    "epsilon": 0.0005
+    "max_iter": 500,
+    "tol": 1e-06,
+    "loss_fun": "square_loss",
+    "algorithm": "exact-CG",
+    "backend": "gpu",
+    "gpu_dtype": "float64"
   },
   "metrics": {
-    "task": null
-  }
+    "correctness": {
+      "gw_cost": 0.007473534884627134,
+      "marginal_error": 0.0
+    },
+    "task": {
+      "dict_used": "train",
+      "p1_nn": 0.0148,
+      "p5_nn": 0.0282,
+      "p1_csls": 0.0148,
+      "p5_csls": 0.0284,
+      "test_p1_nn": 0.006,
+      "test_p5_nn": 0.018666666666666668,
+      "test_p1_csls": 0.006,
+      "test_p5_csls": 0.018666666666666668
+    },
+    "efficiency": {
+      "wall_s": 406.01414040476084,
+      "wall_s_preprocess": 0.8772569801658392,
+      "wall_s_solve": 405.136883424595,
+      "wall_s_total": 406.01414040476084,
+      "gpu_peak_gb": 2.2354750633239746,
+      "ram_peak_gb": 11.942756652832031,
+      "iterations": -1
+    },
+    "stability": {}
+  },
+  "artifacts": {}
 }

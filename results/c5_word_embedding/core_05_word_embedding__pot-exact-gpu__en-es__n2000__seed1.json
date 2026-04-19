@@ -4,15 +4,17 @@
   "seed": 1,
   "solver_version": "pot==0.9.6.post1",
   "subset": "en-es_n2000",
-  "timestamp": "2026-04-18T23:59:51.770540+00:00",
-  "host": "sh04-01n10.int",
+  "timestamp": "2026-04-19T09:31:23.033175+00:00",
+  "host": "sh04-01n07.int",
   "status": "ok",
   "error": null,
   "dataset": {
     "pair": "en-es",
     "lang_src": "en",
     "lang_tgt": "es",
-    "n_words": 2000
+    "n_words": 2000,
+    "vec_norm": "both",
+    "dist_norm": "mean"
   },
   "hyperparams": {
     "max_iter": 500,
@@ -24,27 +26,27 @@
   },
   "metrics": {
     "correctness": {
-      "gw_cost": 0.0053616603381203805,
+      "gw_cost": 0.008317576206147613,
       "marginal_error": 0.0
     },
     "task": {
       "dict_used": "train",
-      "p1_nn": 0.009345794392523364,
-      "p5_nn": 0.026937877954920284,
-      "p1_csls": 0.009345794392523364,
-      "p5_csls": 0.025288620120945574,
+      "p1_nn": 0.006047278724573941,
+      "p5_nn": 0.014843320505772403,
+      "p1_csls": 0.006047278724573941,
+      "p5_csls": 0.015393073117097306,
       "test_p1_nn": 0.0,
       "test_p5_nn": 0.0,
       "test_p1_csls": 0.0,
       "test_p5_csls": 0.0
     },
     "efficiency": {
-      "wall_s": 6.458523768000305,
-      "wall_s_preprocess": 0.06709970161318779,
-      "wall_s_solve": 6.391424066387117,
-      "wall_s_total": 6.458523768000305,
+      "wall_s": 11.035406686365604,
+      "wall_s_preprocess": 0.054175528697669506,
+      "wall_s_solve": 10.981231157667935,
+      "wall_s_total": 11.035406686365604,
       "gpu_peak_gb": 0.08946943283081055,
-      "ram_peak_gb": 1.0628318786621094,
+      "ram_peak_gb": 1.0951347351074219,
       "iterations": -1
     },
     "stability": {}
