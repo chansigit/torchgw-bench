@@ -1,12 +1,14 @@
 # torchgw-bench experiments — index
 
-Comparison of `torchgw` and POT GW / FGW solvers across four tracks:
+Comparison of `torchgw` and POT GW / FGW solvers across five tracks:
+**C1 point-cloud scalability** (synthetic helix, probes torchgw's memory
+ceiling), **C2 single-cell multi-omics** (paired RNA+ATAC alignment),
 **C3 Y-fork branched manifold** (FGW with feature anchor),
-**C6 TACO shape correspondence** (pure GW on bilaterally-symmetric
-meshes), **C2 single-cell multi-omics** (paired RNA+ATAC alignment),
-and **C5 bilingual word-embedding alignment** (cosine cost on fastText
-vectors, Alvarez-Melis 2018). All figures in [`../figures/`](../figures);
-hardware is **NVIDIA H100 80GB HBM3** throughout.
+**C5 bilingual word-embedding alignment** (cosine cost on fastText
+vectors, Alvarez-Melis 2018), and **C6 TACO shape correspondence**
+(pure GW on bilaterally-symmetric meshes). All figures in
+[`../figures/`](../figures); hardware is **NVIDIA H100 80GB HBM3**
+throughout.
 
 ## Take-home
 
@@ -33,24 +35,62 @@ hardware is **NVIDIA H100 80GB HBM3** throughout.
 >   on the same cost matrices because MC sampling has insufficient
 >   SNR on near-Gaussian-dense cost.
 >
-> ### Decision rule (revised with C5)
+> ### Decision rule (revised with C1 + C5)
 >
-> 1. **N ≥ 10⁴** → torchgw (POT OOMs), but ONLY if cost is
->    structured (kNN, sparse, long-tailed). Dense cost → POT with
->    memory workarounds, or abandon GW.
-> 2. **Feature-anchored FGW** → torchgw if speed matters, POT
->    otherwise; both reach the same quality.
-> 3. **Pure GW on clean symmetric geometry** → POT-exact for best
+> 1. **N ≤ 20k with structured cost** (kNN / graph / geodesic):
+>    **torchgw-landmark** — ρ = 1.00 at 5× pot-entropic's speed (C1, C2).
+> 2. **N ≤ 20k with dense cost** (cosine on high-dim embeddings):
+>    **pot-entropic**. torchgw's MC gradient lacks SNR on dense cost
+>    (C5 proved).
+> 3. **30k ≤ N ≤ 50k**: fragile — torchgw lottery (seed-dependent CUDA
+>    errors), POT fits memory but loses quality (C1 pot-exact at N=20k
+>    already drops to ρ=0.76). Budget more carefully.
+> 4. **N ≥ 50k on single 80 GB H100**: **NO sampled-GW variant runs
+>    reliably** (C1 finding). Multi-GPU or algorithm change required.
+> 5. **Feature-anchored FGW** (C3): either library works; torchgw wins
+>    speed.
+> 6. **Pure GW on symmetric geometry** (C6): POT-exact for best
 >    argmax matching.
-> 4. **Cost built from kNN / graph / geodesic** (C2-style) → torchgw-
->    precomputed with SCOT cost and `M_samples ≥ N/2`.
-> 5. **Dense-cosine cost on high-dim embeddings** (C5-style) → POT,
->    full stop. torchgw-dijkstra is usable (it internally builds kNN
->    structure) but loses to POT by ~6×.
-> 6. **Never leave `M_samples` at default 80** for N < 10k.
-> 7. **Momentum α=0.9 (default) is aggressive for noisy gradients** —
->    α=0.1 implements an implicit 10-iter EMA that helps on marginal
->    SNR, but does not rescue truly dense cost at scale.
+> 7. **Never leave `M_samples` at default 80** for N < 10k (C2); but
+>    at N ≥ 20k the 3N/4 rule ironically hurts memory (C1 showed M too
+>    big blows up `D_left·D_tgt.T` intermediate).
+
+## C1 — Point-cloud scalability ceiling (`core/01_point_cloud_scale`)
+
+**NEW (2026-04-19)** — the first track to explicitly push past POT's
+N-limit and measure **how far torchgw can actually go** on a single
+80 GB H100. Headline finding REVERSES the original hypothesis.
+
+Task: asymmetric 3D helix (linear-radius-growth), rotation-paired,
+kNN-hop geodesic cost, |Spearman| metric (handles cyclic-shift
+ambiguity on spiral).
+
+- **[C1 benchmark + scalability ceiling (2026-04-19)](2026-04-19-c1-point-cloud-scale.md)** —
+  7 GPU solvers × N ∈ {10k, 20k, 50k, 100k} × 3 seeds.
+
+  | Solver | N=10k ρ / wall | N=20k ρ / wall | N=50k | N=100k |
+  |---|---|---|---|---|
+  | **pot-entropic-gpu** | 1.000 / 21s | 1.000 / 91s | — | — |
+  | pot-exact-gpu | 0.88 / 153s | 0.76 / 416s (drops) | — | — |
+  | **torchgw-landmark** ⭐ | **1.000 / 5s** | **1.000 / 19s** (5× faster) | **FAIL (OOM)** | **FAIL (OOM)** |
+  | torchgw-precomputed | 0.94 / 4s | 0.98 / 18s | — | — |
+  | torchgw-dijkstra | 1.000 / 225s | 1.000 / 821s | FAIL | FAIL |
+  | torchgw-lowrank-landmark | 0.27 / 16s | 0.95 / 32s | FAIL | FAIL |
+
+  **THE SCALABILITY REVERSAL**:
+  - Original hypothesis: "POT OOMs at N ≈ 25k; torchgw scales to 100k."
+  - Reality: **torchgw's memory wall is actually N ≈ 30–50k**, not
+    N = 100k. `sampled_gw` allocates three dense O(N²) tensors
+    (`Lambda_aug`, `T`, `Lambda_gw`) inside `_gw_loop` — the "sampled"
+    prefix refers only to the gradient estimator, not to the plan or
+    the Sinkhorn auxiliaries.
+  - `sampled_lowrank_gw` does NOT rescue this: low-rank factorizes the
+    plan but not the gradient; same ceiling.
+
+  **Practical answer**: up to N ≈ 20k, **torchgw-landmark** is the
+  best choice (ρ=1.00, 5× faster than pot-entropic). Beyond ~30k, no
+  sampled-GW variant on a single 80 GB GPU; need multi-GPU or an
+  algorithm that escapes the dense-gradient bottleneck.
 
 ## C3 — Y-fork branched spiral / Swiss roll (`core/03_branched`)
 
@@ -208,39 +248,52 @@ Alvarez-Melis & Jaakkola 2018.
 
 ## Cross-track synthesis
 
-| Axis | C3 (FGW anchor) | C6 (symmetric mesh) | C2 (cross-omics + kNN) | C5 (dense cosine) |
-|---|---|---|---|---|
-| Who wins accuracy | Tie | POT-exact 1.33× | torchgw-precomputed | **POT-entropic ~150×** |
-| Who wins cost | torchgw | torchgw | torchgw | (POT wins accuracy decisively) |
-| Cost structure | — (FGW) | dense geodesic mesh | **kNN hop-count** (sparse) | **dense cosine** (near-Gaussian) |
-| Best ε | 5e-3 (immune) | 5e-2 | 5e-3 | **5e-4** |
-| Best M_samples | 80 OK | 80 OK | 3N/4 required | 3N/4 insufficient |
-| Dominant failure | POT OOM | torchgw mirror flip | M_samples floor | **MC SNR below Gumbel threshold** |
-| Winning torchgw mode | any | precomputed (tuned) | precomputed | none — abandon sampled_gw |
+| Axis | C1 (scalability helix) | C2 (cross-omics kNN) | C3 (FGW anchor) | C5 (dense cosine) | C6 (symmetric mesh) |
+|---|---|---|---|---|---|
+| Who wins accuracy @ small N | Tie | torchgw-precomputed | Tie | POT-entropic ~150× | POT-exact 1.33× |
+| Who wins speed @ small N | **torchgw-landmark 5×** | torchgw 2–9× | torchgw (1–2 orders) | POT | torchgw 2–7× |
+| N ceiling | **~30k (torchgw OOM)** | 5k | 20k | 10k | 2k |
+| Cost structure | kNN hop-count (sparse) | kNN hop-count (sparse) | — (FGW) | dense cosine (near-Gaussian) | dense geodesic mesh |
+| Best ε | 5e-3 | 5e-3 | 5e-3 (immune) | 5e-4 | 5e-2 |
+| Best M_samples | 3N/4 up to ceiling | 3N/4 required | 80 OK | 3N/4 insufficient | 80 OK |
+| Dominant failure | **torchgw O(N²) memory wall** | M_samples floor | POT OOM | MC SNR < √(2 ln N) | torchgw mirror flip |
+| Winning torchgw mode | **landmark** or precomputed | precomputed (SCOT cost) | any | none — abandon | precomputed (tuned) |
 
-### The cross-track lesson (revised)
+### The cross-track lesson (revised with C1)
 
 Same architecture (sampled-GW + Sinkhorn) plays out differently against
-**four task structures**, and the governing variable is **cost-matrix
-structure**, not N:
+**five task structures**, governed by TWO axes:
 
+**Axis 1 — cost matrix entry distribution** (quality):
 - **C3 (feature anchor)**: FGW feature locks the answer; Sinkhorn
   diffuseness is harmless.
 - **C6 (dense geodesic, symmetric)**: POT-exact's sparse CG commits to
   one mirror; torchgw's diffuse plan averages mirrors.
 - **C2 (kNN-sparse geodesic)**: MC sampling naturally hits informative
   entries (few non-zero, long-tailed); torchgw wins.
-- **C5 (dense cosine, weak tail)**: MC sampling is a uninformative
-  bootstrap; torchgw catastrophically loses to POT.
+- **C5 (dense cosine, weak tail)**: MC sampling is uninformative
+  bootstrap; torchgw catastrophically loses.
 
-The axis is not "N size" or "task hardness" but **cost matrix entry
-distribution**:
-- Long-tailed / sparse / bimodal → torchgw wins (informative sampling)
-- Near-Gaussian dense → POT wins (exact bilinear gradient needed)
+Long-tailed / sparse / bimodal → torchgw wins;
+near-Gaussian dense → POT wins.
 
-**This is the unified diagnostic from four tracks**: before deploying
-torchgw, plot a histogram of your cost matrix entries. Long tail or
-peak-at-zero → go torchgw. Dense Gaussian → stay with POT.
+**Axis 2 — N-scaling memory** (feasibility) [**NEW, from C1**]:
+- torchgw's "sampled" prefix refers ONLY to the gradient estimator
+  (M anchor pairs instead of all N²), NOT to the plan (dense N×K) or
+  the Sinkhorn auxiliary (augmented (N+1)×(K+1)).
+- Effective ceiling: **N ≈ 30k** reliably on 80 GB H100; **N ≥ 50k**
+  is lottery; **N ≥ 100k impossible** without multi-GPU or algorithm
+  change.
+- `sampled_lowrank_gw` does NOT rescue this — low-rank factorizes
+  the plan but not the gradient.
+
+**Unified deployment diagnostic**: before using torchgw, answer two
+questions:
+1. Is the cost matrix long-tailed / sparse / bimodal? (Axis 1 = quality
+   feasibility)
+2. Is your N ≤ 30k? (Axis 2 = memory feasibility)
+Both "yes" → torchgw wins. Either "no" → POT, or a different
+algorithm class entirely.
 
 **`M_samples` is torchgw's hidden quality knob.** The default M=80 is
 tuned for N >> 10⁴ (where N² is astronomical and sampling is the whole
@@ -288,6 +341,11 @@ bash tracks/core/05_word_embedding/fetch.sh    # ~3 GB (en/es/fi fastText + MUSE
 bash scripts/run_c5_bench.sh                   # ~4 hours for 90 cells
 python scripts/experiments/run_c5_msamples_sweep.py
 python scripts/experiments/make_c5_plots.py
+
+# --- C1 point-cloud scalability ---
+# No external data — synthetic asymmetric helix
+bash scripts/run_c1_bench.sh                   # ~6 hours; many cells fail at 50k+
+python scripts/experiments/make_c1_plots.py
 
 # --- Tests ---
 python -m pytest tracks/core/03_branched/tests/ \
