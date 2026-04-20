@@ -80,7 +80,8 @@ except Exception: print('0')")"
     [[ "$solver" == torchgw-lowrank-* ]] && rank_flag="--lowrank-rank 20"
 
     echo "[c1] running $solver N=$n seed=$seed  $m_flag $rank_flag"
-    python3 "$RUN_PY" --solver "$solver" --seed "$seed" \
+    # 60 min per-cell wall cap — some dijkstra cells approach this at N=100k
+    timeout 3600 python3 "$RUN_PY" --solver "$solver" --seed "$seed" \
         --data spiral --n-points "$n" --out "$OUT" \
         $eps_flag $m_flag $rank_flag \
         2>&1 | grep -E "^\[C1\]" || true
@@ -88,14 +89,17 @@ except Exception: print('0')")"
 
 for seed in "${SEEDS[@]}"; do
     for n in "${N_POINTS[@]}"; do
-        # N-conditional solver list
+        # N-conditional solver list.  torchgw-lowrank-dijkstra dropped: it's
+        # dominated by torchgw-lowrank-landmark on quality AND is ~100× slower
+        # at large N (e.g. N=20k took 3541s vs 32s for lowrank-landmark).
         if (( n <= 20000 )); then
             SOLVERS=(pot-entropic-gpu pot-exact-gpu \
                      torchgw-landmark torchgw-dijkstra torchgw-precomputed \
-                     torchgw-lowrank-landmark torchgw-lowrank-dijkstra)
+                     torchgw-lowrank-landmark)
         else
-            SOLVERS=(torchgw-landmark torchgw-dijkstra \
-                     torchgw-lowrank-landmark torchgw-lowrank-dijkstra)
+            # N>20k: POT/precomputed self-skip (OOM).  Keep only the variants
+            # that have a chance of fitting on an 80GB H100 with contention.
+            SOLVERS=(torchgw-landmark torchgw-dijkstra torchgw-lowrank-landmark)
         fi
         for inst in "${INSTANCES[@]}"; do
             for solver in "${SOLVERS[@]}"; do

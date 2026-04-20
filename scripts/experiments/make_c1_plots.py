@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -21,6 +20,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -173,7 +173,7 @@ def _setup_fig(title: str, xlabel: str, ylabel: str,
     # Annotate N tick labels
     ax.set_xticks(N_VALUES)
     ax.set_xticklabels([N_LABELS[n] for n in N_VALUES], fontsize=10)
-    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+    ax.xaxis.set_minor_formatter(mticker.NullFormatter())
     return fig, ax
 
 
@@ -345,8 +345,8 @@ def fig_memory(agg: dict, out_path: Path):
         ax.plot(xs, ys, "o-", color=color, label=label,
                 linewidth=1.6, markersize=6)
 
-        if has_fail_after and last_ok_n is not None:
-            ax.plot(last_ok_n, last_ok_y, "x", color=color,
+        if has_fail_after and last_ok_n is not None and last_ok_y is not None:
+            ax.plot([last_ok_n], [last_ok_y], "x", color=color,
                     markersize=12, markeredgewidth=2.5, zorder=5)
 
     ax.legend(fontsize=9, loc="upper left", framealpha=0.85)
