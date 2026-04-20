@@ -77,7 +77,7 @@ H100_GB = 80.0  # GPU ceiling annotation
 
 def load_all() -> list[dict]:
     records = []
-    for p in sorted(DATA_DIR.glob("*.json")):
+    for p in sorted(DATA_DIR.glob("core_01_point_cloud_scale__*.json")):
         try:
             records.append(json.loads(p.read_text()))
         except Exception:
