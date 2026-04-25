@@ -241,7 +241,7 @@ sys.path.insert(0, str(TRACK))
 ```python
 import textwrap, pathlib
 import numpy as np
-import io as track_io  # tracks/core/07_cell_morphology/io.py
+import swc_io
 
 
 def test_read_swc_returns_node_array(tmp_path):
@@ -253,7 +253,7 @@ def test_read_swc_returns_node_array(tmp_path):
         3 3 1.0 1.0 0.0 0.5  2
         4 3 1.0 1.0 1.0 0.5  3
     """))
-    nodes = track_io.read_swc(swc)
+    nodes = swc_io.read_swc(swc)
     assert nodes.shape == (4, 7)
     assert nodes.dtype == np.float64
     assert nodes[0, 6] == -1
@@ -323,7 +323,7 @@ git commit -m "feat(C7): io.py SWC reader + tests"
 
 ```python
 import numpy as np, pathlib
-import io as track_io
+import swc_io  # noqa: F401
 import intracell
 
 
@@ -730,7 +730,7 @@ import numpy as np
 TRACK = pathlib.Path(__file__).resolve().parent
 import sys; sys.path.insert(0, str(TRACK))
 
-import io as track_io  # noqa: F401  (kept for symmetry with other tracks)
+import swc_io  # noqa: F401  (kept for symmetry with other tracks)
 import intracell, eval as track_eval, solvers
 
 
