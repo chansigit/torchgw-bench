@@ -24,3 +24,7 @@ __pycache__/
 
 # Claude Code session state
 .claude/
+
+# Run logs and stray R artifacts
+logs/
+Rplots.pdf

@@ -23,7 +23,7 @@
 - Create: `tracks/core/01_point_cloud_scale/README.md`
 - Create: `tracks/core/01_point_cloud_scale/io.py`
 
-- [ ] **Step 1: `fetch.sh`**
+- [x] **Step 1: `fetch.sh`**
 
 Downloads ModelNet40 (`ModelNet40.zip` from Princeton or mirror). Cache under `data/core_01_point_cloud/`. Extract and verify at least one `.off` file per target class is present.
 
@@ -56,9 +56,9 @@ done
 echo "[c1-fetch] done."
 ```
 
-- [ ] **Step 2: `README.md`** — one-paragraph stub, mention this is the scalability proof, link forward to `docs/experiments/2026-04-19-c1-point-cloud-scale.md`.
+- [x] **Step 2: `README.md`** — one-paragraph stub, mention this is the scalability proof, link forward to `docs/experiments/2026-04-19-c1-point-cloud-scale.md`.
 
-- [ ] **Step 3: `io.py`** — two functions:
+- [x] **Step 3: `io.py`** — two functions:
 
 ```python
 def read_off(path) -> np.ndarray:
@@ -75,11 +75,11 @@ OFF format is simple text: line 1 "OFF", line 2 counts, then vertex coords, then
 
 FPS: pick a random start, iteratively add the farthest point from the already-selected set. Store selected as indices.
 
-- [ ] **Step 4: Unit tests** at `tests/test_io.py`:
+- [x] **Step 4: Unit tests** at `tests/test_io.py`:
   - `read_off`: tiny fixture file → correct shape
   - `fps_downsample`: 1000 random points → 100 FPS samples → max pairwise distance should be ~90% of full point cloud's max distance (rough coverage check)
 
-- [ ] **Step 5: Smoke test**
+- [x] **Step 5: Smoke test**
 
 ```bash
 bash tracks/core/01_point_cloud_scale/fetch.sh
@@ -97,7 +97,7 @@ print('FPS shape:', P_sub.shape)
 
 Expected: (big, 3) for raw, (1000, 3) for FPS output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tracks/core/01_point_cloud_scale/
@@ -112,7 +112,7 @@ git commit -m "feat(C1): scaffolding + ModelNet40 fetch + OFF/FPS I/O"
 - Create: `tracks/core/01_point_cloud_scale/pair.py`
 - Create: `tracks/core/01_point_cloud_scale/eval.py`
 
-- [ ] **Step 1: `pair.py::make_pair(P, n, seed)`**
+- [x] **Step 1: `pair.py::make_pair(P, n, seed)`**
 
 ```python
 def make_pair(P: np.ndarray, n: int, seed: int):
@@ -127,7 +127,7 @@ def make_pair(P: np.ndarray, n: int, seed: int):
 
 Uniform SO(3) via Shoemake's algorithm or scipy.spatial.transform.Rotation.random.
 
-- [ ] **Step 2: `eval.py::correspondence_accuracy(T)`**
+- [x] **Step 2: `eval.py::correspondence_accuracy(T)`**
 
 ```python
 def correspondence_accuracy(T: np.ndarray) -> float:
@@ -138,18 +138,18 @@ def correspondence_accuracy(T: np.ndarray) -> float:
 
 Also add `correspondence_recall_at_k(T, k=5)` for P@5.
 
-- [ ] **Step 3: `eval.py::chamfer_distance(projected, target)`**
+- [x] **Step 3: `eval.py::chamfer_distance(projected, target)`**
 
 Projected = barycentric projection of source through T: `(T / T.sum(1).clip(1e-30)) @ target`. Chamfer = `mean(min_j ||projected[i] - target[j]||²) + symmetric term`.
 
-- [ ] **Step 4: Unit tests** at `tests/test_pair.py`, `tests/test_eval.py`:
+- [x] **Step 4: Unit tests** at `tests/test_pair.py`, `tests/test_eval.py`:
   - `make_pair`: output shapes correct, `||target - R @ source|| < 1e-5`
   - `correspondence_accuracy`: identity plan → 1.0; shuffled plan → 0.0
   - `chamfer_distance`: projected == target → 0; random projected → positive
 
 Run: `pytest tracks/core/01_point_cloud_scale/tests/ -v`. Expect all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tracks/core/01_point_cloud_scale/pair.py \
@@ -167,7 +167,7 @@ git commit -m "feat(C1): pair generation (rotation) + correspondence P@k + Chamf
 
 Mirror C5/C2's structure but with **N-conditional solver lineup**:
 
-- [ ] **Step 1: CLI**
+- [x] **Step 1: CLI**
 
 ```
 --shape-class        airplane | car | lamp | table | sofa  (default airplane)
@@ -185,7 +185,7 @@ Mirror C5/C2's structure but with **N-conditional solver lineup**:
 --out                output dir
 ```
 
-- [ ] **Step 2: Cost matrix construction**
+- [x] **Step 2: Cost matrix construction**
 
 For each input point cloud `P` of shape (n, 3): `C = pairwise Euclidean distance`. **Do NOT normalize** beyond default — for rotation-invariant task, both C1 and C2 are already on the same scale (same point cloud, rotated). Keep float32.
 
@@ -193,13 +193,13 @@ For `torchgw-precomputed` and both POT solvers: pass `(C_src, C_tgt)` to solver.
 
 For `torchgw-landmark`, `torchgw-dijkstra`, and the lowrank variants: pass raw point-cloud coordinates; torchgw builds internal cost.
 
-- [ ] **Step 3: N-conditional solver skip**
+- [x] **Step 3: N-conditional solver skip**
 
 If `N > 20000` AND solver is POT or `torchgw-precomputed`: write a JSON record with `status="skipped_oom_risk"` and `error="N>20000, OOM risk — not attempted"` and exit. This makes the cache-skip logic in the bench script clean and makes the JSON summary honest about what was tested.
 
 If `N > 50000` AND solver is `torchgw-landmark` / `torchgw-dijkstra`: also allow, but log a warning (may OOM on kNN graph at 100k).
 
-- [ ] **Step 4: Two torchgw modes for lowrank**
+- [x] **Step 4: Two torchgw modes for lowrank**
 
 ```python
 def run_torchgw_lowrank_landmark(P_src, P_tgt, ...): 
@@ -216,7 +216,7 @@ def run_torchgw_lowrank_dijkstra(P_src, P_tgt, ...):
 
 Sanity: log `rank` and `lr_max_iter` in `hyperparams`.
 
-- [ ] **Step 5: Metrics recorded**
+- [x] **Step 5: Metrics recorded**
 
 ```python
 rec["metrics"]["task"] = {
@@ -233,7 +233,7 @@ rec["metrics"]["efficiency"] = {
 }
 ```
 
-- [ ] **Step 6: Smoke test**
+- [x] **Step 6: Smoke test**
 
 ```bash
 python tracks/core/01_point_cloud_scale/run.py \
@@ -257,7 +257,7 @@ Expected: P@1 ≥ 0.9, wall_solve < 30s.
 
 If smoke test P@1 << 1.0, pause and debug before proceeding.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tracks/core/01_point_cloud_scale/run.py
@@ -271,7 +271,7 @@ git commit -m "feat(C1): main run.py with N-conditional solver dispatch + lowran
 **Files:**
 - Create: `scripts/run_c1_bench.sh`
 
-- [ ] **Step 1: Sweep iteration**
+- [x] **Step 1: Sweep iteration**
 
 ```
 shape_class × instance_idx × n_points × seed × solver
@@ -284,7 +284,7 @@ shape_class × instance_idx × n_points × seed × solver
 
 Total theoretical cells = 1 × 3 × 6 × 3 × 7 = 378, but N-conditional pruning cuts the POT/precomputed at N>20k, so actual ~250 cells.
 
-- [ ] **Step 2: N-conditional solver list**
+- [x] **Step 2: N-conditional solver list**
 
 In the bash loop:
 
@@ -298,15 +298,15 @@ else
 fi
 ```
 
-- [ ] **Step 3: M_samples rule**
+- [x] **Step 3: M_samples rule**
 
 Same as C2/C5: `M = max(1000, 3N/4)` capped at N, for all torchgw variants.
 
-- [ ] **Step 4: Cache-skip**
+- [x] **Step 4: Cache-skip**
 
 Same pattern as C5: cache JSON if `status != fail` and torchgw cells have `M_samples ≥ 1000`. Skip `"skipped_oom_risk"` cells without re-running.
 
-- [ ] **Step 5: Run**
+- [x] **Step 5: Run**
 
 ```bash
 nohup bash scripts/run_c1_bench.sh > logs/c1_bench.log 2>&1 &
@@ -314,7 +314,7 @@ nohup bash scripts/run_c1_bench.sh > logs/c1_bench.log 2>&1 &
 
 Estimated wall time: small N fast (~1 min per cell × 60 small cells = 1 h); large N potentially 10+ min per cell × 30 large cells = 5+ h. **Total ~4-6 hours.**
 
-- [ ] **Step 6: Commit script (before running — so script exists in git even if bench takes long)**
+- [x] **Step 6: Commit script (before running — so script exists in git even if bench takes long)**
 
 ```bash
 git add scripts/run_c1_bench.sh
@@ -328,11 +328,11 @@ git commit -m "feat(C1): bench sweep script (N ∈ {1k..100k} × 3 seeds × N-co
 **Files:**
 - Create: `scripts/experiments/make_c1_plots.py`
 
-- [ ] **Step 1: Aggregate JSONs**
+- [x] **Step 1: Aggregate JSONs**
 
 Read `results/c1_point_cloud_scale/*.json`, filter by `status=="ok"`, group by (solver, n_points), compute mean ± std across seeds+instances.
 
-- [ ] **Step 2: Figure 1 — wall-time vs N (log-log)**
+- [x] **Step 2: Figure 1 — wall-time vs N (log-log)**
 
 - x-axis: N (log scale, 1000 to 100000)
 - y-axis: wall_solve_s (log scale)
@@ -341,7 +341,7 @@ Read `results/c1_point_cloud_scale/*.json`, filter by `status=="ok"`, group by (
 
 Save: `docs/figures/c1_scalability_wall.png`
 
-- [ ] **Step 3: Figure 2 — P@1 vs N**
+- [x] **Step 3: Figure 2 — P@1 vs N**
 
 - x-axis: N (log scale)
 - y-axis: P@1 correspondence accuracy
@@ -350,7 +350,7 @@ Save: `docs/figures/c1_scalability_wall.png`
 
 Save: `docs/figures/c1_scalability_quality.png`
 
-- [ ] **Step 4: Figure 3 — GPU memory vs N (log-log)**
+- [x] **Step 4: Figure 3 — GPU memory vs N (log-log)**
 
 - x-axis: N (log)
 - y-axis: gpu_peak_gb (log)
@@ -359,7 +359,7 @@ Save: `docs/figures/c1_scalability_quality.png`
 
 Save: `docs/figures/c1_scalability_memory.png`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/experiments/make_c1_plots.py \
@@ -375,7 +375,7 @@ git commit -m "feat(C1): bench execution + headline scalability figures"
 - Create: `docs/experiments/2026-04-19-c1-point-cloud-scale.md`
 - Modify: `docs/experiments/README.md`
 
-- [ ] **Step 1: Writeup** (same structure as C5):
+- [x] **Step 1: Writeup** (same structure as C5):
 
 1. **Positioning**: C1 tests torchgw at N where POT cannot run. All other tracks stop at N≤10k in POT's comfort zone; this is the first track to enter the post-POT regime.
 
@@ -393,11 +393,11 @@ git commit -m "feat(C1): bench execution + headline scalability figures"
 
 6. **Scalability take-home**: validated or not. Quote the max N achieved.
 
-- [ ] **Step 2: Update `docs/experiments/README.md`**
+- [x] **Step 2: Update `docs/experiments/README.md`**
 
 Add C1 section (promote to first/top track since it's "foundation"). Update cross-track synthesis to include the scalability data point.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/experiments/2026-04-19-c1-point-cloud-scale.md docs/experiments/README.md
@@ -405,6 +405,20 @@ git commit -m "docs(C1): large-scale scalability writeup + index update"
 ```
 
 ---
+
+## Status
+
+**Complete (2026-04-25).** All six tasks landed; writeup at
+`docs/experiments/2026-04-19-c1-point-cloud-scale.md`; index entry in
+`docs/experiments/README.md`. Open follow-ups left to a future track,
+not blocking C1 closure:
+- pot-exact CG instability at N=20k (Spearman 0.88 → 0.76) — needs a
+  max-iter / tolerance sweep before being trusted at scale.
+- `torchgw-lowrank-dijkstra` only has seed=0 cells at N=10k/20k; either
+  backfill seeds 1/2 or drop the variant from headline plots.
+- ModelNet40 path was abandoned for synthetic spiral after raw
+  Euclidean cost killed torchgw P@1 (kept here for archival context;
+  the spiral pivot is the actual delivered experiment).
 
 ## Self-review notes
 
