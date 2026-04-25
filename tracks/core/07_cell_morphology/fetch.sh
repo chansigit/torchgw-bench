@@ -10,13 +10,15 @@ mkdir -p "$DATA_DIR/swc/stage_a" "$DATA_DIR/swc/stage_b"
 
 fetch_neuromorpho() {
     local manifest="$1" outdir="$2"
-    while IFS=$'\t' read -r name cls; do
+    while IFS=$'\t' read -r name cls archive; do
         [[ "$name" == "neuron_name" || -z "$name" || "$name" == \#* ]] && continue
         local out="$outdir/${name}.swc"
         [[ -s "$out" ]] && continue
+        # SWC URL uses lowercased archive directory under dableFiles/
+        local archive_lc="$(echo "$archive" | tr '[:upper:]' '[:lower:]')"
         if ! curl -fsSL --retry 3 --max-time 60 -o "$out" \
-                "https://neuromorpho.org/dableFiles/${name}/CNG%20version/${name}.CNG.swc"; then
-            echo "[c7-fetch] WARN: missing $name"; rm -f "$out"
+                "https://neuromorpho.org/dableFiles/${archive_lc}/CNG%20version/${name}.CNG.swc"; then
+            echo "[c7-fetch] WARN: missing $name (archive=$archive)"; rm -f "$out"
         fi
     done < "$manifest"
 }

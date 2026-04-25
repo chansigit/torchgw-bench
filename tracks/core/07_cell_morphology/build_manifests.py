@@ -1,17 +1,15 @@
 #!/usr/bin/env python
 """Populate stage_{a,b}_manifest.txt by querying NeuroMorpho + Allen CTDB.
 
-Run once before fetch.sh; freeze the resulting manifest into git so the
-benchmark is reproducible. Re-running with the same query parameters and
-the same remote release should give the same IDs, but pin once and stop.
+NeuroMorpho's REST API takes POST with a JSON body whose values are lists
+(`{"cell_type":["pyramidal"], "species":["mouse"]}`). The downloadable
+SWC lives at `dableFiles/{archive}/CNG version/{name}.CNG.swc` — note the
+URL path uses the *archive* name, not the neuron name — so we record
+both columns in the manifest.
 
-Stage A: NeuroMorpho.org — 100 cells from each of 3 morphologically
-distinct classes. Defaults pick {cortical pyramidal, cortical basket,
-cerebellar Purkinje} from species=mouse to keep it homogeneous; override
-via --neuromorpho-classes.
-
-Stage B: Allen Brain Atlas Cell Types Database — ~1000 cells with the
-public dendrite_type label (spiny / aspiny / sparsely spiny). Mouse only.
+Allen Brain Atlas Cell Types Database exposes morphology specimens via
+the public Specimen API; the canonical dendrite_type label lives in the
+cells.csv release and may need a manual join — see TODO in stage B.
 """
 from __future__ import annotations
 import argparse
@@ -20,31 +18,29 @@ import requests
 
 TRACK = pathlib.Path(__file__).resolve().parent
 NM_API = "https://neuromorpho.org/api/neuron/select"
-ABA_API = ("https://api.brain-map.org/api/v2/data/Specimen/query.json"
-           "?criteria=[is_cell_specimen$eqtrue],"
-           "structure[acronym$eqVISp]"
-           "&include=neuron_reconstructions,donor(transgenic_lines)"
-           "&num_rows=2000")
+ABA_SPECIMEN_API = (
+    "https://api.brain-map.org/api/v2/data/Specimen/query.json"
+    "?criteria=[is_cell_specimen$eqtrue]"
+    "&include=neuron_reconstructions"
+    "&num_rows={n}&start_row=0"
+)
 
 
-def fetch_neuromorpho(class_name: str, n: int, species: str = "mouse") -> list[str]:
-    """Return up to `n` neuron names matching `class_name` and `species`."""
-    out: list[str] = []
+def fetch_neuromorpho(class_name: str, n: int, species: str = "mouse"
+                      ) -> list[tuple[str, str]]:
+    """Return up to `n` (neuron_name, archive) tuples for class+species."""
+    out: list[tuple[str, str]] = []
     page = 0
-    page_size = 100
-    while len(out) < n and page < 50:
-        params = {
-            "q": f"cell_type:{class_name} AND species:{species}",
-            "size": page_size,
-            "page": page,
-        }
-        r = requests.get(NM_API, params=params, timeout=60)
+    while len(out) < n and page < 200:
+        body = {"cell_type": [class_name], "species": [species]}
+        r = requests.post(f"{NM_API}?size=100&page={page}",
+                          json=body, timeout=60)
         r.raise_for_status()
         items = r.json().get("_embedded", {}).get("neuronResources", [])
         if not items:
             break
         for it in items:
-            out.append(it["neuron_name"])
+            out.append((it["neuron_name"], it["archive"]))
             if len(out) >= n:
                 break
         page += 1
@@ -54,40 +50,31 @@ def fetch_neuromorpho(class_name: str, n: int, species: str = "mouse") -> list[s
 def write_stage_a_manifest(per_class: int, classes: list[str], species: str):
     manifest = TRACK / "stage_a_manifest.txt"
     with open(manifest, "w") as fh:
-        fh.write("neuron_name\tclass\n")
+        fh.write("neuron_name\tclass\tarchive\n")
         for cls in classes:
             print(f"[stage_a] querying NeuroMorpho cell_type={cls!r} ({species}) ...")
-            names = fetch_neuromorpho(cls, per_class, species=species)
-            print(f"[stage_a]   got {len(names)} ids")
-            for name in names:
-                fh.write(f"{name}\t{cls}\n")
+            rows = fetch_neuromorpho(cls, per_class, species=species)
+            print(f"[stage_a]   got {len(rows)} ids")
+            for name, archive in rows:
+                fh.write(f"{name}\t{cls}\t{archive}\n")
     print(f"[stage_a] wrote {manifest}")
 
 
 def fetch_allen_morphology_cells(n: int) -> list[tuple[str, str]]:
-    """Return (specimen_id, dendrite_type) tuples for cells with public SWC."""
-    r = requests.get(ABA_API, timeout=120)
+    """Return (specimen_id, label_placeholder) tuples for cells with a
+    public neuron_reconstruction. Labels need manual join — see TODO."""
+    r = requests.get(ABA_SPECIMEN_API.format(n=n * 4), timeout=180)
     r.raise_for_status()
     rows = r.json().get("msg", [])
     out: list[tuple[str, str]] = []
     for row in rows:
-        recons = row.get("neuron_reconstructions") or []
-        if not recons:
+        if not row.get("neuron_reconstructions"):
             continue
         sid = str(row.get("id"))
-        # Allen's public label is on row['donor']['cell_reporter_status'] for
-        # transgenic info; dendrite_type lives in cell_soma_locations or
-        # the 'name'. The CTDB browser exposes spiny/aspiny via specimen
-        # tags — fall back to "unknown" if not present in this minimal API.
-        dtype = (row.get("dendrite_type")
-                 or row.get("name", "").lower()
-                 or "unknown")
-        # Heuristic: many specimen names start with "cell_<class>_..."; the
-        # canonical way to get dendrite_type is the cells.csv release. Until
-        # this is wired up, leave "unknown" and fix by hand-editing the
-        # manifest before bench. (TODO: switch to cells.csv if you need
-        # the dendrite_type column reliably.)
-        out.append((sid, dtype if dtype else "unknown"))
+        # CTDB browser exposes spiny/aspiny via cells.csv; the Specimen API
+        # alone does not return it cleanly. Default to 'unknown' and require
+        # a manual join before bench (see TODO).
+        out.append((sid, "unknown"))
         if len(out) >= n:
             break
     return out
@@ -103,10 +90,10 @@ def write_stage_b_manifest(n: int):
         for sid, dtype in rows:
             fh.write(f"{sid}\t{dtype}\n")
     print(f"[stage_b] wrote {manifest}")
-    print("[stage_b] NOTE: dendrite_type may be 'unknown' for many rows; "
-          "for production use, join against the Allen CTDB cells.csv release "
-          "to get the canonical spiny/aspiny/sparsely-spiny label and "
-          "edit the manifest before running fetch.sh.")
+    print("[stage_b] NOTE: 'class' column is 'unknown'; for production "
+          "use, join against the Allen CTDB cells.csv to get the canonical "
+          "spiny/aspiny/sparsely-spiny dendrite_type and edit the manifest "
+          "before running fetch.sh.")
 
 
 def main():
