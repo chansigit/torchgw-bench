@@ -1,0 +1,23 @@
+cajal version: 1.5
+
+=== cajal.run_gw.gw (single pair) ===
+signature: (A: 'DistanceMatrix', a: 'Distribution', B: 'DistanceMatrix', b: 'Distribution', max_iters_descent: 'int' = 1000, max_iters_ot: 'int' = 200000) -> 'tuple[Matrix, float]'
+@controller.wrap(limits=1, user_api="blas")
+def gw(
+    A: DistanceMatrix,
+    a: Distribution,
+    B: DistanceMatrix,
+    b: Distribution,
+    max_iters_descent: int = 1000,
+    max_iters_ot: int = 200000,
+) -> tuple[Matrix, float]:
+    """Compute the Gromov-Wasserstein distance between two metric measure spaces."""
+    Aa = A @ a
+    c_A = ((A * A) @ a) @ a
+    Bb = B @ b
+    c_B = ((B * B) @ b) @ b
+    return gw_cython_core(A, a, Aa, c_A, B, b, Bb, c_B, max_iters_descent, max_iters_ot)
+
+
+=== cajal.run_gw.gw_pairwise_parallel (batch) ===
+signature: (cells: 'list[tuple[DistanceMatrix, Distribution]]', num_processes: 'int', names: 'Optional[list[str]]' = None, gw_dist_csv: 'Optional[str]' = None, gw_coupling_mat_csv: 'Optional[str]' = None, return_coupling_mats: 'bool' = False) -> 'tuple[DistanceMatrix, Optional[list[tuple[int, int, Matrix]]]]'
