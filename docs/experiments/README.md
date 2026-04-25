@@ -246,18 +246,30 @@ Alvarez-Melis & Jaakkola 2018.
     0.9.6's Sinkhorn does not converge at 5e-5. **5e-4 is the actual
     operating point.**
 
+## C7 — Cell morphology vs CAJAL (`core/07_cell_morphology`)
+
+**NEW (2026-04-25, scaffold — bench pending)** — first track in the
+"many tiny GW" regime. Reuses [CAJAL](https://cajal.readthedocs.io/)'s
+intracell-geodesic preprocessing and swaps only the pairwise-GW step
+across `cajal-native` / `pot-entropic-gpu` / `pot-exact-gpu` /
+`torchgw-precomputed`. Sample-size sweep `N_per_cell ∈ {50…1000}` × 3
+seeds × 2 stages (NeuroMorpho hand-picked, Allen CTDB).
+
+- **[C7 cell morphology vs CAJAL (2026-04-25)](2026-04-25-c7-cell-morphology.md)** —
+  scaffold + writeup template; numbers populated post-bench.
+
 ## Cross-track synthesis
 
-| Axis | C1 (scalability helix) | C2 (cross-omics kNN) | C3 (FGW anchor) | C5 (dense cosine) | C6 (symmetric mesh) |
-|---|---|---|---|---|---|
-| Who wins accuracy @ small N | Tie | torchgw-precomputed | Tie | POT-entropic ~150× | POT-exact 1.33× |
-| Who wins speed @ small N | **torchgw-landmark 5×** | torchgw 2–9× | torchgw (1–2 orders) | POT | torchgw 2–7× |
-| N ceiling | **~30k (torchgw OOM)** | 5k | 20k | 10k | 2k |
-| Cost structure | kNN hop-count (sparse) | kNN hop-count (sparse) | — (FGW) | dense cosine (near-Gaussian) | dense geodesic mesh |
-| Best ε | 5e-3 | 5e-3 | 5e-3 (immune) | 5e-4 | 5e-2 |
-| Best M_samples | 3N/4 up to ceiling | 3N/4 required | 80 OK | 3N/4 insufficient | 80 OK |
-| Dominant failure | **torchgw O(N²) memory wall** | M_samples floor | POT OOM | MC SNR < √(2 ln N) | torchgw mirror flip |
-| Winning torchgw mode | **landmark** or precomputed | precomputed (SCOT cost) | any | none — abandon | precomputed (tuned) |
+| Axis | C1 (scalability helix) | C2 (cross-omics kNN) | C3 (FGW anchor) | C5 (dense cosine) | C6 (symmetric mesh) | C7 (cell morpho, many tiny GW) |
+|---|---|---|---|---|---|---|
+| Who wins accuracy @ small N | Tie | torchgw-precomputed | Tie | POT-entropic ~150× | POT-exact 1.33× | `<fill post-bench>` |
+| Who wins speed @ small N | **torchgw-landmark 5×** | torchgw 2–9× | torchgw (1–2 orders) | POT | torchgw 2–7× | `<fill post-bench>` |
+| N ceiling | **~30k (torchgw OOM)** | 5k | 20k | 10k | 2k | 1000 cells × 1000 pts |
+| Cost structure | kNN hop-count (sparse) | kNN hop-count (sparse) | — (FGW) | dense cosine (near-Gaussian) | dense geodesic mesh | intracell geodesic (sparse, ~50–1000) |
+| Best ε | 5e-3 | 5e-3 | 5e-3 (immune) | 5e-4 | 5e-2 | 5e-3 (default) |
+| Best M_samples | 3N/4 up to ceiling | 3N/4 required | 80 OK | 3N/4 insufficient | 80 OK | max(N, 3N/4) capped 1000 |
+| Dominant failure | **torchgw O(N²) memory wall** | M_samples floor | POT OOM | MC SNR < √(2 ln N) | torchgw mirror flip | `<fill — likely GPU launch overhead at N=50>` |
+| Winning torchgw mode | **landmark** or precomputed | precomputed (SCOT cost) | any | none — abandon | precomputed (tuned) | precomputed (only fair mode for swap) |
 
 ### The cross-track lesson (revised with C1)
 
