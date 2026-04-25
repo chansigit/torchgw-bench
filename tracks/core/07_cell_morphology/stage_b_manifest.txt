@@ -1,0 +1,4 @@
+specimen_id	class
+# TODO: populate via `python build_manifests.py --stage B`, then join against
+# Allen CTDB cells.csv release to get canonical dendrite_type labels and
+# overwrite the `class` column. Target: ~1000 cells.
