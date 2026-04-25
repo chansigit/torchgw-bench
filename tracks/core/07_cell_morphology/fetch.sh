@@ -24,16 +24,11 @@ fetch_neuromorpho() {
 }
 
 fetch_allen() {
-    local manifest="$1" outdir="$2"
-    while IFS=$'\t' read -r sid cls; do
-        [[ "$sid" == "specimen_id" || -z "$sid" || "$sid" == \#* ]] && continue
-        local out="$outdir/${sid}.swc"
-        [[ -s "$out" ]] && continue
-        if ! curl -fsSL --retry 3 --max-time 60 -o "$out" \
-                "http://api.brain-map.org/api/v2/well_known_file_download/specimen/${sid}/recon.swc"; then
-            echo "[c7-fetch] WARN: missing $sid"; rm -f "$out"
-        fi
-    done < "$manifest"
+    # Allen requires resolving each specimen_id → well_known_file_id via
+    # the Specimen JSON include — the simpler endpoint returns 404. Done
+    # in fetch_allen.py with thread pool for speed (~10 min for ~700).
+    env -u PYTHONPATH micromamba run -n c7_morph python \
+        "$SCRIPT_DIR/fetch_allen.py"
 }
 
 fetch_neuromorpho "$SCRIPT_DIR/stage_a_manifest.txt" "$DATA_DIR/swc/stage_a"
