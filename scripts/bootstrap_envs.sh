@@ -44,3 +44,8 @@ done
 
 echo "[bootstrap] Done. Created/updated envs:"
 mamba env list | grep '^tgwbench-' || true
+
+# C7 cell morphology — isolated to keep CAJAL's POT pin off C2/C3/C5/C6
+if ! micromamba env list | grep -q '^c7_morph '; then
+    micromamba env create -f tracks/core/07_cell_morphology/env.yaml -y
+fi
