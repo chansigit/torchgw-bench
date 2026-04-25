@@ -45,7 +45,12 @@ done
 echo "[bootstrap] Done. Created/updated envs:"
 mamba env list | grep '^tgwbench-' || true
 
-# C7 cell morphology — isolated to keep CAJAL's POT pin off C2/C3/C5/C6
+# C7 cell morphology — isolated to keep CAJAL's POT pin off C2/C3/C5/C6.
+# Sherlock lmod injects /share/software/.../py-numpy via PYTHONPATH which
+# breaks pip (Read-only file system: 'f2py'); unset it for env creation
+# and any later `pip install` into this env.
 if ! micromamba env list | grep -q '^c7_morph '; then
-    micromamba env create -f tracks/core/07_cell_morphology/env.yaml -y
+    env -u PYTHONPATH micromamba env create -f tracks/core/07_cell_morphology/env.yaml -y
+    env -u PYTHONPATH micromamba run -n c7_morph pip install \
+        cajal pot torchgw umap-learn scikit-learn matplotlib psutil pytest
 fi
