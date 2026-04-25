@@ -16,6 +16,7 @@ for solver in "${SOLVERS[@]}"; do
     for n in "${N_VALUES[@]}"; do
         # spec §5: pot-exact-gpu skipped above N=200 (CG memory)
         if [[ "$solver" == "pot-exact-gpu" && "$n" -gt 200 ]]; then continue; fi
+        if [[ "$solver" == "torchgw-precomputed" && "$n" -gt 200 ]]; then continue; fi
         for seed in "${SEEDS[@]}"; do
             tag="${solver}__stage_b__n${n}__seed${seed}"
             json="$OUT/core_07_cell_morphology__${tag}.json"

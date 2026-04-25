@@ -31,7 +31,8 @@ def _read_manifest(stage: str) -> tuple[list[pathlib.Path], np.ndarray, list[str
             line = raw.strip()
             if not line or line.startswith("neuron_name") or line.startswith("specimen_id"):
                 continue
-            name, cls = line.split("\t")
+            parts = line.split("\t")
+            name, cls = parts[0], parts[1]  # 3rd column (archive) is fetch.sh-only
             p = swc_dir / f"{name}.swc"
             if p.exists():
                 paths.append(p); lbls.append(cls)
@@ -106,6 +107,12 @@ def main():
 
     if args.solver == "pot-exact-gpu" and args.n_per_cell > 200:
         print(f"[c7] skip pot-exact-gpu at n_per_cell={args.n_per_cell} > 200")
+        return
+    if args.solver == "torchgw-precomputed" and args.n_per_cell > 200:
+        # smoke showed ~0.45 s/pair at N=50 → ~10 s/pair at N=1000;
+        # serial 45 000-pair loop = 5+ days per (seed). Skip per spec §10.
+        print(f"[c7] skip torchgw-precomputed at n_per_cell={args.n_per_cell} > 200 "
+              f"(serial-loop infeasible for many-tiny-GW; see spec §10 caveat 1)")
         return
 
     stage = f"stage_{args.stage.lower()}"
