@@ -138,11 +138,26 @@ def main():
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        D_list = [intracell.compute_intracell(p, args.n_per_cell, cache_dir)
-                  for p in paths]
+        # Filter cells where CAJAL can't sample n_per_cell points (tree too short).
+        D_list_raw = [intracell.compute_intracell(p, args.n_per_cell, cache_dir)
+                      for p in paths]
+        keep = [i for i, D in enumerate(D_list_raw) if D is not None]
+        n_skipped = len(paths) - len(keep)
+        if n_skipped > 0:
+            print(f"[c7] skipped {n_skipped}/{len(paths)} cells "
+                  f"(CAJAL couldn't sample {args.n_per_cell} pts geodesically)")
+        if len(keep) < 10:
+            raise RuntimeError(
+                f"only {len(keep)} cells survived n_per_cell={args.n_per_cell}; "
+                f"refusing to bench")
+        D_list = [D_list_raw[i] for i in keep]
+        y_keep = y[keep]
+        rec["n_cells_used"] = len(keep)
+        rec["n_cells_skipped"] = n_skipped
+
         M, eff = _gw_full_matrix(args.solver, D_list,
                                  epsilon=args.epsilon, M_samples=None, seed=args.seed)
-        ev = track_eval.eval_distance_matrix(M, y, k_classes=len(classes), knn_k=5)
+        ev = track_eval.eval_distance_matrix(M, y_keep, k_classes=len(classes), knn_k=5)
         rec["metrics"]    = ev
         rec["efficiency"] = eff
         # save the full distance matrix only for seed 0 (UMAP figures use this)

@@ -22,8 +22,9 @@ def compute_intracell(
     swc_path: str | pathlib.Path,
     n_per_cell: int,
     cache_dir: str | pathlib.Path,
-) -> np.ndarray:
-    """Return the n×n intracell geodesic distance matrix for one SWC file."""
+) -> np.ndarray | None:
+    """Return the n×n intracell geodesic distance matrix, or None if CAJAL
+    can't sample n_per_cell points from this tree (too short)."""
     swc_path = pathlib.Path(swc_path)
     cache_dir = pathlib.Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -41,7 +42,15 @@ def compute_intracell(
     # Pick the largest tree by node count — handles SWCs with detached fragments.
     tree = max(trees.values(), key=lambda t: len(t.subtree_list()) if hasattr(t, 'subtree_list') else 1)
 
-    condensed, _adjacency = icdm_geodesic(tree, n_per_cell)
+    try:
+        condensed, _adjacency = icdm_geodesic(tree, n_per_cell)
+    except Exception as e:
+        # CAJAL raises "Binary search timed out" when a tree is too short to
+        # support n_per_cell geodesic samples. Surface as a marker file so
+        # downstream code can skip this (cell, n_per_cell) combo cleanly.
+        marker = cache_file.with_suffix(".skip")
+        marker.write_text(f"{type(e).__name__}: {e}\n")
+        return None
     D = squareform(condensed).astype(np.float64)
     np.save(cache_file, D)
     return D
