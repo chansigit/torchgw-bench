@@ -258,18 +258,30 @@ seeds × 2 stages (NeuroMorpho hand-picked, Allen CTDB).
 - **[C7 cell morphology vs CAJAL (2026-04-25)](2026-04-25-c7-cell-morphology.md)** —
   scaffold + writeup template; numbers populated post-bench.
 
+## C8 — fMRI brain alignment vs FUGW (`core/08_brain_alignment`)
+
+**NEW (2026-04-26, scaffold — bench pending)** — first track testing
+large fused **unbalanced** GW on real fMRI data. Benchmarks FUGW against
+`pot-entropic-fgw`, `torchgw-balanced`, and the new `torchgw-unbalanced`
+PR across 3 resolutions (fsaverage5/6/7), 66 subject pairs, 3 seeds.
+Dataset: **Brainomics Localizer** (12 subjects × 32 task contrasts, fully
+open in nilearn; IBC was originally planned but requires EBRAINS auth).
+
+- **[C8 fMRI brain alignment vs FUGW (2026-04-26)](2026-04-26-c8-brain-alignment.md)** —
+  scaffold + writeup template; numbers populated post-bench.
+
 ## Cross-track synthesis
 
-| Axis | C1 (scalability helix) | C2 (cross-omics kNN) | C3 (FGW anchor) | C5 (dense cosine) | C6 (symmetric mesh) | C7 (cell morpho, many tiny GW) |
-|---|---|---|---|---|---|---|
-| Who wins accuracy @ small N | Tie | torchgw-precomputed | Tie | POT-entropic ~150× | POT-exact 1.33× | `<fill post-bench>` |
-| Who wins speed @ small N | **torchgw-landmark 5×** | torchgw 2–9× | torchgw (1–2 orders) | POT | torchgw 2–7× | `<fill post-bench>` |
-| N ceiling | **~30k (torchgw OOM)** | 5k | 20k | 10k | 2k | 1000 cells × 1000 pts |
-| Cost structure | kNN hop-count (sparse) | kNN hop-count (sparse) | — (FGW) | dense cosine (near-Gaussian) | dense geodesic mesh | intracell geodesic (sparse, ~50–1000) |
-| Best ε | 5e-3 | 5e-3 | 5e-3 (immune) | 5e-4 | 5e-2 | 5e-3 (default) |
-| Best M_samples | 3N/4 up to ceiling | 3N/4 required | 80 OK | 3N/4 insufficient | 80 OK | max(N, 3N/4) capped 1000 |
-| Dominant failure | **torchgw O(N²) memory wall** | M_samples floor | POT OOM | MC SNR < √(2 ln N) | torchgw mirror flip | `<fill — likely GPU launch overhead at N=50>` |
-| Winning torchgw mode | **landmark** or precomputed | precomputed (SCOT cost) | any | none — abandon | precomputed (tuned) | precomputed (only fair mode for swap) |
+| Axis | C1 (scalability helix) | C2 (cross-omics kNN) | C3 (FGW anchor) | C5 (dense cosine) | C6 (symmetric mesh) | C7 (cell morpho, many tiny GW) | C8 (fMRI alignment, large fused unbalanced GW) |
+|---|---|---|---|---|---|---|---|
+| Who wins accuracy @ small N | Tie | torchgw-precomputed | Tie | POT-entropic ~150× | POT-exact 1.33× | `<fill post-bench>` | `<fill post-bench>` |
+| Who wins speed @ small N | **torchgw-landmark 5×** | torchgw 2–9× | torchgw (1–2 orders) | POT | torchgw 2–7× | `<fill post-bench>` | `<fill post-bench>` |
+| N ceiling | **~30k (torchgw OOM)** | 5k | 20k | 10k | 2k | 1000 cells × 1000 pts | 12 subjects × 163k vertices/hemi (fsaverage7) |
+| Cost structure | kNN hop-count (sparse) | kNN hop-count (sparse) | — (FGW) | dense cosine (near-Gaussian) | dense geodesic mesh | intracell geodesic (sparse, ~50–1000) | mesh geodesic (dense fs5/6, sparse fs7) + cosine feat |
+| Best ε | 5e-3 | 5e-3 | 5e-3 (immune) | 5e-4 | 5e-2 | 5e-3 (default) | 5e-3 |
+| Best M_samples | 3N/4 up to ceiling | 3N/4 required | 80 OK | 3N/4 insufficient | 80 OK | max(N, 3N/4) capped 1000 | 3N/4 capped 1000 |
+| Dominant failure | **torchgw O(N²) memory wall** | M_samples floor | POT OOM | MC SNR < √(2 ln N) | torchgw mirror flip | `<fill — likely GPU launch overhead at N=50>` | `<fill: pot OOM @ fs6, torchgw-bal OOM @ fs7?>` |
+| Winning torchgw mode | **landmark** or precomputed | precomputed (SCOT cost) | any | none — abandon | precomputed (tuned) | precomputed (only fair mode for swap) | balanced + unbalanced both viable depending on PR |
 
 ### The cross-track lesson (revised with C1)
 
