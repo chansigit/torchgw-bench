@@ -1,0 +1,56 @@
+# Manifest: 12 Brainomics Localizer subjects + train/test contrast split.
+# Brainomics Localizer (Pinel et al. 2007) — 94 subjects, 32 task
+# contrasts in MNI152 volume space. We pick the first 12 by ID and split
+# contrasts 70/30 by sorted contrast name (22 train / 10 test).
+#
+# Contrast indices are 0-based into the alphabetically-sorted list of the
+# 32 human-readable contrast keys in nilearn's CONTRAST_NAME_WRAPPER:
+#
+#  0  button press (auditory cue) vs sentence listening
+#  1  button press (visual cue) vs sentence reading
+#  2  button press vs calculation and sentence listening/reading
+#  3  calculation (auditory and visual cue)
+#  4  calculation (auditory cue)
+#  5  calculation (auditory cue) and sentence listening
+#  6  calculation (auditory cue) and sentence listening vs calculation (visual cue) and sentence reading
+#  7  calculation (auditory cue) vs sentence listening
+#  8  calculation (visual cue)
+#  9  calculation (visual cue) and sentence reading
+# 10  calculation (visual cue) and sentence reading vs calculation (auditory cue) and sentence listening
+# 11  calculation (visual cue) and sentence reading vs checkerboard
+# 12  calculation (visual cue) vs sentence reading
+# 13  calculation and sentence listening/reading vs button press
+# 14  calculation vs sentences
+# 15  checkerboard
+# 16  horizontal checkerboard
+# 17  horizontal vs vertical checkerboard
+# 18  left button press
+# 19  left button press (auditory cue)
+# 20  left button press (visual cue)
+# 21  left vs right button press
+# 22  right button press
+# 23  right button press (auditory cue)
+# 24  right button press (visual cue)
+# 25  right vs left button press
+# 26  sentence listening
+# 27  sentence listening and reading
+# 28  sentence reading
+# 29  sentence reading vs checkerboard
+# 30  vertical checkerboard
+# 31  vertical vs horizontal checkerboard
+#
+# Format: subject_id<TAB>train<TAB>test
+# Train/test are 0-based indices into the alphabetically-sorted contrast list.
+subject_id	train	test
+S01	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S02	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S03	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S04	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S05	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S06	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S07	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S08	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S09	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S10	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S11	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31
+S12	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21	22,23,24,25,26,27,28,29,30,31

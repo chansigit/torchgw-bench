@@ -56,18 +56,19 @@ implementation.
 
 ## 4. Dataset
 
-**IBC (Individual Brain Charting)** — 12 subjects × ~50 task contrast
-maps, fsaverage5/6/7 cortical surface projections.
+**Brainomics Localizer (Pinel et al. 2007)** — 94 subjects × 32 task contrasts in MNI152 volume space.
 
-- Acquired via `nilearn.datasets.fetch_individual_brain_charting` (or
-  direct OpenNeuro mirror).
-- Manifest committed to git: 12 subject IDs + per-subject train/test
-  contrast split (frozen, paper-aligned). 70/30 split by contrast index.
-- Surface meshes: standard fsaverage{5,6,7} from FreeSurfer (downloaded
-  by nilearn). One mesh per subject is unnecessary — IBC contrasts are
-  already projected to fsaverage common space, so the mesh is shared.
+Originally we planned to use IBC, but its data fetcher (`ibc_api`) requires
+EBRAINS account registration; Localizer has the same task-contrast inter-subject
+alignment structure, lives in nilearn natively (no auth), and is fully reproducible.
 
-Out of scope (deliberate): HCP scale-push, cross-species, multimodal.
+- Acquired via `nilearn.datasets.fetch_localizer_contrasts`.
+- 12 subjects (S01-S12) pinned in `manifest.txt`.
+- 32 contrasts split 70/30 (22 train / 10 test) by sorted contrast name.
+- Volume → fsaverage{5,6,7} surface projection happens in `precompute.py`
+  via `nilearn.surface.vol_to_surf`.
+
+Out of scope (deliberate): real IBC, HCP, NSD, cross-species, multimodal.
 
 ## 5. Pipeline and swap point
 
