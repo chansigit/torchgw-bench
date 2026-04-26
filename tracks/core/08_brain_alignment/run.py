@@ -99,8 +99,10 @@ def _load_subject(sid: str, train_idx: list[int], test_idx: list[int],
     F = np.zeros((n_v, n_contrasts), dtype=np.float32)
     for i, v in enumerate(surface_vals):
         if v is not None:
-            F[:, i] = v
-        # else leave zeros (tolerable for bench — a few files may be missing)
+            # vol_to_surf produces NaN at cortical vertices outside the MNI152
+            # volume ("Mean of empty slice"). Replace with 0 so NaNs don't
+            # propagate into C_lin or downstream eval.
+            F[:, i] = np.nan_to_num(v, nan=0.0)
 
     F_train = F[:, train_idx]
     F_test = F[:, test_idx]
@@ -113,11 +115,34 @@ def _load_subject(sid: str, train_idx: list[int], test_idx: list[int],
     return {"C_geo": C_geo, "F_train": F_train, "F_test": F_test, "n_v": n_v}
 
 
+def _normalize_cost(C: np.ndarray) -> np.ndarray:
+    """Normalize a cost matrix to [0, 1] by dividing by its max.
+
+    Required for numerical stability of entropic solvers: without this,
+    geodesic matrices with max ~500 (fsaverage5 units) cause Sinkhorn
+    weights exp(-C/epsilon) to underflow to 0 at epsilon=5e-3.
+    """
+    from scipy import sparse as _sp
+    if _sp.issparse(C):
+        mx = C.data.max() if C.nnz > 0 else 1.0
+        return C / mx
+    mx = C.max()
+    return C / mx if mx > 0 else C
+
+
 def _gw_full_call(solver, sub_A, sub_B, *, epsilon, fgw_alpha, seed,
                   rho_a, rho_b):
-    """Build C_lin from train features and call solver."""
+    """Build C_lin from train features and call solver.
+
+    All cost matrices are normalized to [0, 1] for numerical stability of
+    entropic (Sinkhorn-based) solvers. C_lin is already in [0, 2] (cosine
+    dissimilarity), so we normalize it by 2.
+    """
     C_lin = precompute.feature_cost_matrix(sub_A["F_train"], sub_B["F_train"])
-    return solvers.fgw_pair(solver, sub_A["C_geo"], sub_B["C_geo"], C_lin,
+    C_geo_a = _normalize_cost(sub_A["C_geo"])
+    C_geo_b = _normalize_cost(sub_B["C_geo"])
+    C_lin_n = C_lin / 2.0  # cosine dissim ∈ [0, 2] → [0, 1]
+    return solvers.fgw_pair(solver, C_geo_a, C_geo_b, C_lin_n,
                             epsilon=epsilon, fgw_alpha=fgw_alpha, seed=seed,
                             rho_a=rho_a, rho_b=rho_b)
 
