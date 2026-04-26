@@ -1,0 +1,17 @@
+fugw version: 0.1.1
+top-level: []
+mappings: ['FUGW', 'FUGWBarycenter', 'FUGWSparse', 'barycenter', 'dense', 'sparse', 'utils']
+
+=== FUGW ===
+  __init__ sig: (self, alpha=0.5, rho=1, eps=0.01, reg_mode='joint', divergence='kl')
+  fit sig:      (self, source_features=None, target_features=None, source_geometry=None, target_geometry=None, source_features_val=None, target_features_val=None, source_geometry_val=None, target_geometry_val=None, source_weights=None, target_weights=None, init_plan=None, init_duals=None, solver='mm', solver_params={}, callback_bcd=None, device='auto', verbose=False)
+  transform sig: (self, source_features, id_reg=0, device='auto')
+
+=== FUGWBarycenter ===
+  __init__ sig: (self, alpha=0.5, rho=1, eps=0.01, reg_mode='joint', force_psd=False, learn_geometry=False)
+  fit sig:      (self, weights_list, features_list, geometry_list, barycenter_size=None, init_barycenter_weights=None, init_barycenter_features=None, init_barycenter_geometry=None, solver='sinkhorn', solver_params={}, nits_barycenter=5, device='auto', verbose=False)
+
+=== FUGWSparse ===
+  __init__ sig: (self, alpha=0.5, rho=1, eps=0.01, reg_mode='joint', divergence='kl')
+  fit sig:      (self, source_features=None, target_features=None, source_geometry_embedding=None, target_geometry_embedding=None, source_features_val=None, target_features_val=None, source_geometry_embedding_val=None, target_geometry_embedding_val=None, source_weights=None, target_weights=None, init_plan=None, init_duals=None, solver='mm', solver_params={}, callback_bcd=None, device='auto', verbose=False)
+  transform sig: (self, source_features, id_reg=0, device='auto')

@@ -54,3 +54,13 @@ if ! micromamba env list | grep -q '^c7_morph '; then
     env -u PYTHONPATH micromamba run -n c7_morph pip install \
         cajal pot torchgw umap-learn scikit-learn matplotlib psutil pytest
 fi
+
+# C8 brain alignment — needs nilearn + fugw + gdist + editable torchgw.
+# Editable torchgw install pulls our local PR branch's _solver.py.
+if ! micromamba env list | grep -q '^c8_brain '; then
+    env -u PYTHONPATH micromamba env create -f tracks/core/08_brain_alignment/env.yaml -y
+    env -u PYTHONPATH micromamba run -n c8_brain pip install \
+        nilearn nibabel fugw gdist scikit-learn matplotlib psutil pytest pot
+    env -u PYTHONPATH micromamba run -n c8_brain pip install \
+        -e /scratch/users/chensj16/projects/sgw-c8
+fi
