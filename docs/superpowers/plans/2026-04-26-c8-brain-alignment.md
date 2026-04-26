@@ -92,9 +92,9 @@ def _sinkhorn_loop_pytorch(
 
     for it in range(max_iter):
         log_u_raw = log_a - torch.logsumexp(log_K + log_v.unsqueeze(0), dim=1)
-        log_u = log_u_raw if is_balanced_a else tau_a * log_u_raw + (1 - tau_a) * log_u
+        log_u = log_u_raw if is_balanced_a else tau_a * log_u_raw  # UOT scale-from-zero, NOT affine mix
         log_v_raw = log_b - torch.logsumexp(log_K + log_u.unsqueeze(1), dim=0)
-        log_v = log_v_raw if is_balanced_b else tau_b * log_v_raw + (1 - tau_b) * log_v
+        log_v = log_v_raw if is_balanced_b else tau_b * log_v_raw  # UOT scale-from-zero
 
         if tol > 0 and (it + 1) % check_every == 0:
             log_marginal = log_u + torch.logsumexp(log_K + log_v.unsqueeze(0), dim=1)
@@ -267,9 +267,9 @@ def _sinkhorn_unrolled(
     is_b_balanced = (tau_b == 1.0)
     for it in range(max_iter):
         log_u_raw = log_a - torch.logsumexp(log_K + log_v.unsqueeze(0), dim=1)
-        log_u = log_u_raw if is_a_balanced else tau_a * log_u_raw + (1 - tau_a) * log_u
+        log_u = log_u_raw if is_a_balanced else tau_a * log_u_raw  # UOT scale-from-zero
         log_v_raw = log_b - torch.logsumexp(log_K + log_u.unsqueeze(1), dim=0)
-        log_v = log_v_raw if is_b_balanced else tau_b * log_v_raw + (1 - tau_b) * log_v
+        log_v = log_v_raw if is_b_balanced else tau_b * log_v_raw  # UOT scale-from-zero
         if tol > 0 and (it + 1) % check_every == 0:
             log_marginal = log_u + torch.logsumexp(log_K + log_v.unsqueeze(0), dim=1)
             if torch.abs(torch.exp(log_marginal) - a).max().item() < tol:
