@@ -98,9 +98,10 @@ def load_localizer_contrast_volume(subject_id: str, contrast: str) -> np.ndarray
         3D float64 array of shape (X, Y, Z).
     """
     from nilearn import datasets
-    # n_subjects=5 matches the on-disk cache (S01–S05).
+    # 12 subjects (S01–S12) on disk per manifest.txt; nilearn returns up to
+    # n_subjects from cache without re-downloading.
     loc = datasets.fetch_localizer_contrasts(
-        [contrast], n_subjects=5,
+        [contrast], n_subjects=12,
         data_dir=str(DATA_ROOT / "localizer"),
         get_anats=False, get_masks=False, verbose=0,
     )
